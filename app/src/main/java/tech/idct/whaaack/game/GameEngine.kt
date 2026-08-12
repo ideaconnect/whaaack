@@ -278,25 +278,38 @@ class GameEngine(private val random: Random = Random.Default) {
         const val SPLAT_LIFE_MS = 1_100
         const val STRIKE_FLASH_MS = 420
 
-        private const val LEVEL_STEP_MS = 5_000L
+        /** How long a speed level lasts before the orchard steps up a gear. */
+        private const val LEVEL_STEP_MS = 4_000L
         private const val NS_PER_MS = 1_000_000L
 
         /** Fraction of an interval to wait before a slot refills. */
         private const val SPAWN_GAP = 0.35f
         private const val SPAWN_JITTER = 0.45f
 
+        // Difficulty curve. Both tracks ramp linearly per level and then hold at a floor;
+        // the floors are what "top speed" actually means, so they are named rather than
+        // repeated as literals — the HUD's speed bar reads its bounds from them too.
+        private const val START_INTERVAL_MS = 900
+        private const val MIN_INTERVAL_MS = 200
+        private const val INTERVAL_STEP_MS = 72
+
+        private const val START_LIFE_MS = 1_550
+        private const val MIN_LIFE_MS = 430
+        private const val LIFE_STEP_MS = 135
+
         /** Gap between spawns, tightening as the run goes on. */
-        fun spawnIntervalMs(level: Int): Int = max(260, 900 - level * 62)
+        fun spawnIntervalMs(level: Int): Int =
+            max(MIN_INTERVAL_MS, START_INTERVAL_MS - level * INTERVAL_STEP_MS)
 
         /** How long a fruit stays whackable, shrinking as the run goes on. */
-        fun fruitLifeMs(level: Int): Int = max(560, 1550 - level * 118)
+        fun fruitLifeMs(level: Int): Int =
+            max(MIN_LIFE_MS, START_LIFE_MS - level * LIFE_STEP_MS)
 
         /** 0..1 progress toward top speed, for the HUD's speed bar. */
         fun speedFraction(level: Int): Float {
-            val slowest = 900f
-            val fastest = 260f
+            val span = (START_INTERVAL_MS - MIN_INTERVAL_MS).toFloat()
             val current = spawnIntervalMs(level).toFloat()
-            return ((slowest - current) / (slowest - fastest)).coerceIn(0f, 1f)
+            return ((START_INTERVAL_MS - current) / span).coerceIn(0f, 1f)
         }
     }
 }
