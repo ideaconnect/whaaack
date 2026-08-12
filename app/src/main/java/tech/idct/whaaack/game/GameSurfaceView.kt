@@ -1,0 +1,297 @@
+package tech.idct.whaaack.game
+
+import android.annotation.SuppressLint
+import android.content.Context
+import android.graphics.Canvas
+import android.os.Build
+import android.util.AttributeSet
+import android.view.MotionEvent
+import android.view.SurfaceHolder
+import android.view.SurfaceView
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
+
+/**
+ * Hosts the game on a dedicated render thread.
+ *
+ * Frames are composed with [SurfaceHolder.lockHardwareCanvas], which returns a Canvas backed
+ * by HWUI's GPU pipeline — draw calls are recorded into a display list and rasterised by the
+ * GPU, never by the CPU, and never on the main thread. The main thread's only involvement is
+ * forwarding touch coordinates, which it hands over through a lock-free queue in
+ * [GameEngine].
+ *
+ * Shutdown ordering is the delicate part. The framework tears down the buffer queue as soon
+ * as `surfaceDestroyed` returns, and destroying it while a buffer is still dequeued segfaults
+ * inside EGL. Two things guard against that:
+ *
+ *  - [stopRendering] joins the render thread with no timeout — a bounded wait would
+ *    reintroduce exactly the race it exists to close;
+ *  - it is called from [onDetachedFromWindow] as well as `surfaceDestroyed`, so the thread is
+ *    already stopped by the time the view is being taken apart.
+ */
+class GameSurfaceView @JvmOverloads constructor(
+    context: Context,
+    attrs: AttributeSet? = null,
+) : SurfaceView(context, attrs), SurfaceHolder.Callback {
+
+    interface Callbacks {
+        fun onGameOver(result: GameEngine.Result)
+        fun onQuit()
+        fun onHit(fruit: Fruit)
+        fun onStrike(strikes: Int)
+    }
+
+    val engine = GameEngine()
+    var callbacks: Callbacks? = null
+
+    @Volatile
+    private var assets: GameAssets? = null
+    private val renderer = GameRenderer(resources.displayMetrics.density)
+
+    @Volatile
+    private var thread: RenderThread? = null
+
+    @Volatile
+    private var topInset = 0f
+
+    @Volatile
+    private var bottomInset = 0f
+
+    private var pendingStart: Boolean? = null
+    private var reportedOver = false
+
+    init {
+        holder.addCallback(this)
+        // The renderer paints every pixel each frame, so an opaque surface lets the
+        // compositor skip blending this layer against the window behind it.
+        setZOrderOnTop(false)
+        holder.setFormat(android.graphics.PixelFormat.OPAQUE)
+
+        ViewCompat.setOnApplyWindowInsetsListener(this) { _, insets ->
+            val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+            topInset = bars.top.toFloat()
+            bottomInset = bars.bottom.toFloat()
+            thread?.invalidateLayout()
+            insets
+        }
+
+        engine.listener = object : GameEngine.Listener {
+            override fun onHit(fruit: Fruit) {
+                callbacks?.onHit(fruit)
+            }
+
+            override fun onStrike(strikes: Int) {
+                callbacks?.onStrike(strikes)
+            }
+
+            override fun onGameOver(result: GameEngine.Result) {
+                if (reportedOver) return
+                reportedOver = true
+                post { callbacks?.onGameOver(result) }
+            }
+        }
+    }
+
+    /** Supplies the preloaded sprite sheet; safe to call before the surface exists. */
+    fun attachAssets(assets: GameAssets) {
+        this.assets = assets
+        thread?.invalidateLayout()
+    }
+
+    fun startRun(ranked: Boolean) {
+        reportedOver = false
+        renderer.reset()
+        if (thread == null) {
+            pendingStart = ranked
+        } else {
+            engine.start(ranked, System.nanoTime())
+        }
+    }
+
+    fun quitRun() {
+        engine.quit(System.nanoTime())
+        callbacks?.onQuit()
+    }
+
+    /** Stops the render thread and waits for it. Safe to call more than once. */
+    fun stopRendering() {
+        val running = thread
+        thread = null
+        if (running == null) return
+        running.shutdown()
+        // unlockCanvasAndPost hands the frame to HWUI's shared render thread, which finishes
+        // it asynchronously. Joining our own thread is therefore not enough: give that last
+        // frame a couple of vsyncs to drain before the caller lets the surface go, or its
+        // buffer is still dequeued when the buffer queue is destroyed.
+        android.os.SystemClock.sleep(HWUI_DRAIN_MS)
+    }
+
+    @SuppressLint("ClickableViewAccessibility")
+    override fun onTouchEvent(event: MotionEvent): Boolean {
+        if (event.actionMasked != MotionEvent.ACTION_DOWN) return true
+        val x = event.x
+        val y = event.y
+
+        if (renderer.endRunRect.contains(x, y)) {
+            quitRun()
+            return true
+        }
+        val tile = renderer.tileAt(x, y)
+        if (tile >= 0) engine.postTap(tile)
+        return true
+    }
+
+    override fun onDetachedFromWindow() {
+        // Runs before the surface is torn down, which is the calmest moment to stop.
+        stopRendering()
+        super.onDetachedFromWindow()
+    }
+
+    override fun surfaceCreated(holder: SurfaceHolder) {
+        readRootInsets()
+        val t = RenderThread(holder)
+        thread = t
+        t.start()
+        pendingStart?.let {
+            engine.start(it, System.nanoTime())
+            pendingStart = null
+        }
+    }
+
+    override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
+        // Compose's AndroidView does not always forward insets down to us, so read them
+        // straight off the window root. This callback is on the main thread and runs after
+        // layout, so the values are settled by now.
+        readRootInsets()
+        thread?.resize(width, height)
+    }
+
+    override fun surfaceDestroyed(holder: SurfaceHolder) {
+        stopRendering()
+    }
+
+    private fun readRootInsets() {
+        val bars = ViewCompat.getRootWindowInsets(this)
+            ?.getInsets(WindowInsetsCompat.Type.systemBars())
+            ?: return
+        topInset = bars.top.toFloat()
+        bottomInset = bars.bottom.toFloat()
+    }
+
+    private inner class RenderThread(
+        private val surfaceHolder: SurfaceHolder,
+    ) : Thread("whaaack-render") {
+
+        @Volatile
+        private var running = true
+
+        @Volatile
+        private var pendingWidth = 0
+
+        @Volatile
+        private var pendingHeight = 0
+
+        @Volatile
+        private var layoutDirty = true
+
+        private var appliedWidth = 0
+        private var appliedHeight = 0
+
+        fun resize(w: Int, h: Int) {
+            pendingWidth = w
+            pendingHeight = h
+            layoutDirty = true
+        }
+
+        fun invalidateLayout() {
+            layoutDirty = true
+        }
+
+        fun shutdown() {
+            running = false
+            // Unbounded on purpose: the loop only ever waits on the buffer queue for about
+            // a frame, and any timeout here would let the surface be destroyed while a
+            // buffer is still dequeued.
+            while (true) {
+                try {
+                    join()
+                    return
+                } catch (_: InterruptedException) {
+                    Thread.currentThread().interrupt()
+                }
+            }
+        }
+
+        override fun run() {
+            while (running) {
+                val sheet = assets
+                if (sheet == null) {
+                    // Sprites still decoding: idle rather than spin.
+                    try {
+                        sleep(16)
+                    } catch (_: InterruptedException) {
+                        break
+                    }
+                    continue
+                }
+
+                if (layoutDirty || pendingWidth != appliedWidth || pendingHeight != appliedHeight) {
+                    appliedWidth = pendingWidth
+                    appliedHeight = pendingHeight
+                    layoutDirty = false
+                    if (appliedWidth > 0 && appliedHeight > 0) {
+                        renderer.onSurfaceChanged(
+                            appliedWidth, appliedHeight, topInset, bottomInset, sheet,
+                        )
+                    }
+                }
+                if (appliedWidth <= 0 || appliedHeight <= 0) {
+                    try {
+                        sleep(8)
+                    } catch (_: InterruptedException) {
+                        break
+                    }
+                    continue
+                }
+
+                // Re-check immediately before acquiring a buffer so a teardown that began
+                // while the previous frame was drawing stops us here instead of leaving a
+                // buffer dequeued.
+                if (!running || !surfaceHolder.surface.isValid) break
+
+                val canvas = lockCanvas() ?: break
+                try {
+                    val now = System.nanoTime()
+                    engine.update(now)
+                    renderer.draw(canvas, engine, sheet, now)
+                } finally {
+                    try {
+                        surfaceHolder.unlockCanvasAndPost(canvas)
+                    } catch (_: IllegalStateException) {
+                        // Surface went away underneath us; the callback stops the thread.
+                        break
+                    }
+                }
+            }
+        }
+
+        /**
+         * Prefers the GPU-backed canvas. The software path is only a defensive fallback for
+         * devices that refuse a hardware surface.
+         */
+        private fun lockCanvas(): Canvas? = try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                surfaceHolder.lockHardwareCanvas() ?: surfaceHolder.lockCanvas()
+            } else {
+                surfaceHolder.lockCanvas()
+            }
+        } catch (_: IllegalStateException) {
+            null
+        }
+    }
+
+    private companion object {
+        /** Roughly three vsyncs at 60 Hz. */
+        const val HWUI_DRAIN_MS = 48L
+    }
+}

@@ -1,0 +1,65 @@
+# Remote auth configuration for the linked Whaaack! project.
+# Push with:  supabase config push
+#
+# Secrets are read from the environment via env(...) so nothing sensitive is committed.
+# Required environment variables:
+#   RESEND_API_KEY        Resend SMTP password (the API key itself)
+#   GOOGLE_CLIENT_ID      OAuth *web* client id from Google Cloud
+#   GOOGLE_CLIENT_SECRET  matching client secret
+#   GOOGLE_ANDROID_CLIENT_ID  OAuth *Android* client id (native Credential Manager flow)
+
+project_id = "pklrfcbyseitdbxkmsnw"
+
+[auth]
+# Deep link the app registers for password-reset and confirmation callbacks.
+site_url = "whaaack://auth"
+additional_redirect_urls = ["whaaack://auth", "https://idct.tech/whaaack/auth"]
+
+jwt_expiry = 3600
+enable_refresh_token_rotation = true
+refresh_token_reuse_interval = 10
+
+# Ranked play requires an account, but nothing about the game needs anonymous rows.
+enable_anonymous_sign_ins = false
+enable_signup = true
+
+[auth.email]
+enable_signup = true
+# Players must prove the address before their name can appear on a public leaderboard.
+enable_confirmations = true
+double_confirm_changes = true
+secure_password_change = true
+max_frequency = "60s"
+otp_expiry = 1800
+
+[auth.email.smtp]
+enabled = true
+host = "smtp.resend.com"
+# 587 (STARTTLS). Supabase's mailer negotiates STARTTLS and does not speak implicit TLS,
+# so port 465 fails with "Error sending confirmation email".
+port = 587
+user = "resend"
+pass = "env(RESEND_API_KEY)"
+# The sending domain must be verified in Resend before delivery will succeed.
+admin_email = "noreply@idct.tech"
+sender_name = "Whaaack!"
+
+# [auth.sessions] (timebox / inactivity_timeout) needs a Pro plan; on Free the
+# refresh-token rotation above is what bounds a stale session.
+
+[auth.rate_limit]
+email_sent = 10
+sign_in_sign_ups = 30
+token_refresh = 150
+anonymous_users = 10
+
+# Google sign-in. Left disabled until the Google Cloud OAuth clients exist — see
+# docs/SETUP.md. Once GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET are exported, flip
+# `enabled` to true and run `supabase config push` again.
+[auth.external.google]
+enabled = false
+client_id = "env(GOOGLE_CLIENT_ID)"
+secret = "env(GOOGLE_CLIENT_SECRET)"
+# Credential Manager returns an ID token minted for the Android client; Supabase must
+# accept it in addition to the web client that signs it.
+skip_nonce_check = false

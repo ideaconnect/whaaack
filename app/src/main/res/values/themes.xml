@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The window background matches the orchard night sky so the very first frame
+         (drawn before the SurfaceView has a surface) does not flash white. -->
+    <style name="Theme.Whaaack" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/orchard_night</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowLightStatusBar">false</item>
+    </style>
+</resources>

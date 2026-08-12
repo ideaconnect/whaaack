@@ -1,0 +1,19 @@
+*.iml
+.gradle/
+local.properties
+.idea/
+.DS_Store
+build/
+captures/
+.externalNativeBuild
+.cxx
+*.apk
+*.aab
+*.keystore
+!debug.keystore
+
+# Supabase CLI writes resolved credentials here.
+supabase/.temp/
+supabase/.branches/
+.env
+.env.local
