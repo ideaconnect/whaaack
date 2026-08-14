@@ -9,8 +9,16 @@ captures/
 .cxx
 *.apk
 *.aab
+# Signing material. *.jks matters most: it is what keytool and Android Studio name a
+# keystore by default, so without it the release key lands in the first `git add .` — on a
+# public repo. keystore.properties holds its passwords.
 *.keystore
+*.jks
 !debug.keystore
+keystore.properties
+*.p12
+*.pepk
+*.der
 
 # Regenerate with: python tools/generate_launcher_icons.py --preview
 tools/icon-preview.png

@@ -19,6 +19,38 @@ val secrets = Properties().apply {
 fun secret(key: String, default: String = ""): String =
     secrets.getProperty(key) ?: System.getenv(key) ?: default
 
+/**
+ * Release signing. The keystore lives outside the repo and its passwords in a git-ignored
+ * keystore.properties beside it, with an environment fallback so CI can inject them instead.
+ *
+ * Absent on a machine that has neither, the release build stays unsigned rather than failing
+ * to configure — a fresh clone can still run every debug task and the unit tests.
+ */
+val keystoreProps = Properties().apply {
+    val f = rootProject.file("keystore.properties")
+    if (f.exists()) f.inputStream().use { load(it) }
+}
+
+fun signing(key: String): String? =
+    (keystoreProps.getProperty(key) ?: System.getenv("WHAAACK_${key.uppercase()}"))
+        ?.takeIf { it.isNotBlank() }
+
+/**
+ * Present-but-wrong must not silently degrade to an unsigned build. Skipping the config when
+ * `keystore.properties` is absent is intentional — a fresh clone and a CI runner without
+ * secrets still configure and can run every debug task. But once someone has declared a
+ * keystore, a path that does not resolve is a mistake, and the failure mode is nasty: the
+ * build stays green and hands back an artifact Play rejects. (This is not hypothetical — the
+ * first attempt wrote the path in Git Bash form, `/c/Users/...`, which the JVM on Windows
+ * cannot open, and produced exactly that.)
+ */
+val releaseStore: File? = signing("storeFile")?.let(::File)?.also {
+    check(it.exists()) {
+        "keystore.properties points at a keystore that does not exist: ${it.absolutePath} — " +
+            "on Windows use a path the JVM can open (C:/Users/...), not a Git Bash path (/c/Users/...)."
+    }
+}
+
 android {
     namespace = "tech.idct.whaaack"
     compileSdk = 36
@@ -64,6 +96,17 @@ android {
         )
     }
 
+    signingConfigs {
+        if (releaseStore != null) {
+            create("release") {
+                storeFile = releaseStore
+                storePassword = signing("storePassword")
+                keyAlias = signing("keyAlias")
+                keyPassword = signing("keyPassword")
+            }
+        }
+    }
+
     buildTypes {
         debug {
             // Google's reserved always-fill test unit, so debug runs never touch live
@@ -76,6 +119,7 @@ android {
             )
         }
         release {
+            signingConfig = signingConfigs.findByName("release")
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(
