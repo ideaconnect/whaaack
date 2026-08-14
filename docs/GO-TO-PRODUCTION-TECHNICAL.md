@@ -16,10 +16,40 @@ See also: **[non-technical plan](GO-TO-PRODUCTION-NON-TECHNICAL.md)**.
 
 ## Where this stands
 
-**31 of 96 done.** Sections are ordered by when you need them, not by size.
+**36 of 96 done.** Sections are ordered by when you need them, not by size.
 
 | Section | Done |
 | --- | --- |
+| 1. Engineering decisions to settle first | 0 / 3 |
+| 2. Release engineering — the build has never been signed or run | 0 / 21 |
+| 3. Code — defects that block or damage the launch | **done** |
+| 4. Backend — Supabase | 5 / 21 |
+| 5. Ads and billing — the code side | 0 / 13 |
+| 6. The website — markup, CSS and CI | 5 / 6 |
+| 7. Testing and QA | 0 / 6 |
+| 8. The game itself | **done** |
+| 9. Repo hygiene | **done** |
+
+Everything ticked is on `main` and pushed. The database migration is applied to
+`pklrfcbyseitdbxkmsnw` and verified against it, SMTP is live, and **the website is published** —
+the Pages workflow ran green on `e08583e` with all seven guards, including the four new ones,
+and `idct.tech/whaaack/` now serves the branded 404, the sitemap and the slimmed icons.
+
+Ticked items keep their original diagnosis in the tense it was written, with a
+**Done / Resolved / Decided** note recording what actually happened and where the outcome
+differed from what the item proposed.
+
+**The critical path is the release keystore (§2).** There is still no signing config, so no
+installable release artifact has ever existed — which means every code fix in §3, §5 and §8 is
+compiled and unit tested but has never run on a device. The R8 shakeout in §2 is what turns
+"compiles" into "works", and most of what remains elsewhere is gated behind it.
+
+**Two things are blocked on someone else, not on work:** the Web3Forms dashboard toggle that
+would make the contact form's captcha real (§6 — tested, it currently accepts submissions
+without one), and one line in the `ideaconnect.github.io` repo registering
+`/whaaack/sitemap.xml` in the apex sitemap index.
+
+--- | --- |
 | 1. Engineering decisions to settle first | 0 / 3 |
 | 2. Release engineering — the build has never been signed or run | 0 / 21 |
 | 3. Code — defects that block or damage the launch | **done** |
