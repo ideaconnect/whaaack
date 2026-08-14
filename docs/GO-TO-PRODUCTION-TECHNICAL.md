@@ -16,7 +16,7 @@ See also: **[non-technical plan](GO-TO-PRODUCTION-NON-TECHNICAL.md)**.
 
 ## Where this stands
 
-**36 of 96 done.** Sections are ordered by when you need them, not by size.
+**37 of 96 done.** Sections are ordered by when you need them, not by size.
 
 | Section | Done |
 | --- | --- |
@@ -24,7 +24,7 @@ See also: **[non-technical plan](GO-TO-PRODUCTION-NON-TECHNICAL.md)**.
 | 2. Release engineering — the build has never been signed or run | 0 / 21 |
 | 3. Code — defects that block or damage the launch | **done** |
 | 4. Backend — Supabase | 5 / 21 |
-| 5. Ads and billing — the code side | 0 / 13 |
+| 5. Ads and billing — the code side | 1 / 13 |
 | 6. The website — markup, CSS and CI | 5 / 6 |
 | 7. Testing and QA | 0 / 6 |
 | 8. The game itself | **done** |
@@ -825,7 +825,7 @@ reasoning survives.
 The console side of both — ad unit types, COPPA flags, creating the product — lives in the
 [non-technical plan](GO-TO-PRODUCTION-NON-TECHNICAL.md). These are the parts that need a build.
 
-- [ ] **Set a maximum ad content rating** 🟡
+- [x] **Set a maximum ad content rating** — **code side done; the console half is yours**
   `maxAdContentRating` is UNSPECIFIED, so AdMob may serve up to MA-rated creatives — gambling,
   dating, alcohol — inside a cartoon fruit game that will carry PEGI 3 / Everyone. Play's Ads
   policy requires ads appropriate to the declared content rating, so this is policy exposure, not
@@ -833,6 +833,27 @@ The console side of both — ad unit types, COPPA flags, creating the product �
   versa: `MobileAds.setRequestConfiguration(…MAX_AD_CONTENT_RATING_G…)` before `initialize`, and
   AdMob → Blocking controls → Ad content rating. While there, block the categories that generate
   one-star reviews in a family-friendly game.
+
+  **Done in code: pinned to `MAX_AD_CONTENT_RATING_G`.** G rather than PG because it matches the
+  Everyone / PEGI 3 rating this game expects and the 13+ audience declared on Play, and because
+  G is the setting that excludes gambling, dating and alcohol outright. It narrows the demand
+  pool and costs some eCPM — the deliberate price of not gambling the rating. The value is a
+  single named constant in `AdsManager`.
+
+  Two implementation details that are load-bearing. It is applied in the **constructor**, not
+  inside `initialize()`: the merged manifest declares `MobileAdsInitProvider`, so the SDK can
+  already be up before anything in that class runs, and this must be in force before the first
+  *request* — a different moment from initialisation. And it is built from
+  `MobileAds.getRequestConfiguration().toBuilder()` rather than a fresh `Builder`, so it cannot
+  silently clear something set elsewhere; test device ids are the obvious casualty of getting
+  that wrong. The whole API surface was checked with `javap` against the shipped
+  `play-services-ads-api-25.4.0.aar` rather than assumed.
+
+  **Remaining, and it is yours: set the same ceiling in AdMob → Blocking controls**, plus the
+  sensitive categories. Neither half is sufficient alone — the console can serve a rating the app
+  never asked for, and a rebuild can override what the console says. Whichever is stricter wins,
+  and the two drifting apart is how a family-friendly game ends up carrying a dating ad. Keep
+  this constant, the console setting and the IARC answers in step.
 
 - [ ] **Handle US state privacy** 🟡
   The UMP integration is GDPR-only in intent and wording: the KDoc says "GDPR / IAB TCF", the debug
