@@ -11,6 +11,8 @@
     <application
         android:name=".WhaaackApp"
         android:allowBackup="true"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:fullBackupContent="@xml/backup_rules"
         android:hardwareAccelerated="true"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
@@ -22,8 +24,15 @@
             android:name="com.google.android.gms.ads.APPLICATION_ID"
             android:value="${admobAppId}" />
 
-        <!-- Ads are only ever requested from the game-over screen, so let the SDK
-             defer its own initialisation until we explicitly ask for it. -->
+        <!-- Keeps the SDK's own initialisation and ad loading off the main thread, which is
+             what these two flags actually control (they do not defer initialisation — that
+             is AdsManager's job, and it only initialises once consent allows it).
+
+             Both default to true as of Ads SDK 24.0.0 and play-services-ads-api declares
+             them itself with the same value, so these are redundant. They are kept as an
+             explicit statement of intent that survives a future change of default; because
+             the values match the library's, the manifest merger has nothing to resolve. Do
+             not set either to false without adding tools:replace. -->
         <meta-data
             android:name="com.google.android.gms.ads.flag.OPTIMIZE_INITIALIZATION"
             android:value="true" />

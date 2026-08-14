@@ -20,6 +20,11 @@ data class Session(
     val userId: String,
     val email: String?,
     val provider: String,
+    /**
+     * Last known profile name, cached here so a relaunch can name the player from disk
+     * instead of waiting on the profiles round trip.
+     */
+    val displayName: String? = null,
 ) {
     companion object {
         fun fromTokenResponse(json: Json, raw: String): Session? = runCatching {
@@ -28,6 +33,7 @@ data class Session(
             val refresh = root.str("refresh_token") ?: return@runCatching null
             val expiresIn = root.str("expires_in")?.toLongOrNull() ?: 3600L
             val user = root["user"]?.jsonObject
+            val meta = user?.get("user_metadata")?.jsonObject
             Session(
                 accessToken = access,
                 refreshToken = refresh,
@@ -35,6 +41,9 @@ data class Session(
                 userId = user?.str("id").orEmpty(),
                 email = user?.str("email"),
                 provider = user?.get("app_metadata")?.jsonObject?.str("provider") ?: "email",
+                // A starting point only; the profiles table is the authority and overwrites
+                // this as soon as it answers. Google supplies `name` rather than our own key.
+                displayName = meta?.str("display_name") ?: meta?.str("name"),
             )
         }.getOrNull()
     }
@@ -56,6 +65,7 @@ class SessionStore(private val context: Context) {
     private val keyUserId = stringPreferencesKey("user_id")
     private val keyEmail = stringPreferencesKey("email")
     private val keyProvider = stringPreferencesKey("provider")
+    private val keyDisplayName = stringPreferencesKey("display_name")
 
     suspend fun current(): Session? {
         val prefs = context.sessionDataStore.data.first()
@@ -68,6 +78,7 @@ class SessionStore(private val context: Context) {
             userId = prefs[keyUserId].orEmpty(),
             email = prefs[keyEmail],
             provider = prefs[keyProvider] ?: "email",
+            displayName = prefs[keyDisplayName],
         )
     }
 
@@ -80,6 +91,20 @@ class SessionStore(private val context: Context) {
             val email = session.email
             if (email != null) prefs[keyEmail] = email else prefs.remove(keyEmail)
             prefs[keyProvider] = session.provider
+            val name = session.displayName
+            if (name != null) prefs[keyDisplayName] = name else prefs.remove(keyDisplayName)
+        }
+    }
+
+    /**
+     * Updates only the cached name. A read-modify-write of the whole [Session] would race
+     * the token refresh that runs on the same store and could put a rotated refresh token
+     * back to its previous value.
+     */
+    suspend fun saveDisplayName(name: String) {
+        context.sessionDataStore.edit { prefs ->
+            // Never resurrect a session that was signed out while the profile was in flight.
+            if (prefs[keyAccess] != null) prefs[keyDisplayName] = name
         }
     }
 

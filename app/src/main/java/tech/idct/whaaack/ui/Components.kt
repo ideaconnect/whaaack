@@ -1,5 +1,6 @@
 package tech.idct.whaaack.ui
 
+import android.os.SystemClock
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -27,7 +28,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
+import androidx.compose.runtime.State
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -40,9 +41,10 @@ import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.DrawScope
-import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
@@ -78,20 +80,27 @@ fun OrchardBackdrop(
     val trees = remember(assets) { assets?.trees?.asImageBitmap() }
     val hills = remember(assets) { assets?.hills?.asImageBitmap() }
 
-    val transition = rememberInfiniteTransition(label = "parallax")
-    val phase by transition.animateFloat(
-        initialValue = 0f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 42_000, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart,
-        ),
-        label = "drift",
-    )
-    val drift = if (animate) phase else 0f
+    // Only run the animation when it is actually wanted — switching parallax off used to
+    // leave the infinite transition running and merely ignore its output.
+    val phase: State<Float>? = if (animate) {
+        rememberInfiniteTransition(label = "parallax").animateFloat(
+            initialValue = 0f,
+            targetValue = 1f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(durationMillis = 42_000, easing = LinearEasing),
+                repeatMode = RepeatMode.Restart,
+            ),
+            label = "drift",
+        )
+    } else {
+        null
+    }
 
     Box(modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color(0xFF4C82D0), Color(0xFF2A1633))))) {
         androidx.compose.foundation.Canvas(Modifier.fillMaxSize()) {
+            // Read inside the draw lambda, not the composable body: that keeps each frame of
+            // the drift a redraw instead of a recomposition of this whole subtree.
+            val drift = phase?.value ?: 0f
             if (sky != null) tileLayer(sky, drift, 1f, 0f, size.height)
             val groundHeight = size.height * 0.63f
             val groundTop = size.height - groundHeight
@@ -249,7 +258,8 @@ fun WhaaackField(
             ),
         singleLine = true,
         placeholder = { Text(placeholder, color = Color(0x66FFF3E6)) },
-        visualTransformation = if (isPassword) PasswordVisualTransformation() else androidx.compose.ui.text.input.VisualTransformation.None,
+        visualTransformation =
+            if (isPassword) PasswordVisualTransformation() else VisualTransformation.None,
         keyboardOptions = keyboardOptions,
         textStyle = LocalTextStyle.current.copy(fontSize = 15.sp, fontWeight = FontWeight.SemiBold),
         colors = TextFieldDefaults.colors(
@@ -437,10 +447,10 @@ private fun GoogleGlyph() {
         val inset = stroke / 2
         val arcSize = Size(s - stroke, s - stroke)
         val topLeft = Offset(inset, inset)
-        drawArc(Color(0xFFEA4335), 135f, 90f, false, topLeft, arcSize, style = androidx.compose.ui.graphics.drawscope.Stroke(stroke))
-        drawArc(Color(0xFFFBBC05), 180f, 90f, false, topLeft, arcSize, style = androidx.compose.ui.graphics.drawscope.Stroke(stroke))
-        drawArc(Color(0xFF34A853), 45f, 90f, false, topLeft, arcSize, style = androidx.compose.ui.graphics.drawscope.Stroke(stroke))
-        drawArc(Color(0xFF4285F4), -45f, 90f, false, topLeft, arcSize, style = androidx.compose.ui.graphics.drawscope.Stroke(stroke))
+        drawArc(Color(0xFFEA4335), 135f, 90f, false, topLeft, arcSize, style = Stroke(stroke))
+        drawArc(Color(0xFFFBBC05), 180f, 90f, false, topLeft, arcSize, style = Stroke(stroke))
+        drawArc(Color(0xFF34A853), 45f, 90f, false, topLeft, arcSize, style = Stroke(stroke))
+        drawArc(Color(0xFF4285F4), -45f, 90f, false, topLeft, arcSize, style = Stroke(stroke))
         drawRect(
             Color(0xFF4285F4),
             topLeft = Offset(s * 0.5f, s * 0.42f),
@@ -449,20 +459,27 @@ private fun GoogleGlyph() {
     }
 }
 
-/** Click modifier that ignores the ripple and stays quiet when disabled. */
+/**
+ * Click modifier that ignores the ripple, stays quiet when disabled, and — as the name
+ * says — fires once. The debounce matters: these handlers start ads, submit forms and
+ * delete accounts, and a double tap used to run them twice.
+ */
 @Composable
 fun Modifier.clickableOnce(enabled: Boolean, onClick: () -> Unit): Modifier {
     val interaction = remember { MutableInteractionSource() }
+    val lastClick = remember { longArrayOf(0L) }
     return this.clickable(
         interactionSource = interaction,
         indication = null,
         enabled = enabled,
-        onClick = onClick,
-    )
+    ) {
+        val now = SystemClock.uptimeMillis()
+        if (now - lastClick[0] >= CLICK_DEBOUNCE_MS) {
+            lastClick[0] = now
+            onClick()
+        }
+    }
 }
 
-val ScoreNumberStyle = TextStyle(
-    fontSize = 60.sp,
-    fontWeight = FontWeight.Black,
-    color = AccentLight,
-)
+/** Long enough to swallow a fumbled double tap, short enough not to feel unresponsive. */
+private const val CLICK_DEBOUNCE_MS = 500L

@@ -52,6 +52,14 @@ class GameSettings(private val context: Context) {
         }
     }
 
+    /**
+     * Drops the stored best. Deleting an account promises "we keep nothing", and the local
+     * copy is the last place a deleted player's score would otherwise survive.
+     */
+    suspend fun clearLocalBest() {
+        context.settingsDataStore.edit { it.remove(keyBest) }
+    }
+
     private suspend fun put(key: androidx.datastore.preferences.core.Preferences.Key<Boolean>, value: Boolean) {
         context.settingsDataStore.edit { it[key] = value }
     }

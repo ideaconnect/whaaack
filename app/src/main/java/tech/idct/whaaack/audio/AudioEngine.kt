@@ -41,9 +41,19 @@ class AudioEngine(context: Context) {
     private var loseId = 0
     private var splatIds = IntArray(0)
 
+    // All five are touched only on the main thread, inside the posts below.
     private var player: MediaPlayer? = null
     private var currentTrack = Track.NONE
     private var desiredTrack = Track.NONE
+
+    /** True between prepareAsync and onPrepared, while the player must not be touched. */
+    private var preparing = false
+
+    /** True between onPause and onResume, so a prepare that lands meanwhile stays quiet. */
+    private var lifecyclePaused = false
+
+    /** Bumped whenever the current player is discarded, to strand in-flight prepares. */
+    private var generation = 0
 
     @Volatile
     var soundEnabled: Boolean = true
@@ -51,6 +61,10 @@ class AudioEngine(context: Context) {
     @Volatile
     var musicEnabled: Boolean = true
         set(value) {
+            // The settings flow re-publishes every preference on every write, so this is
+            // assigned again whenever sound, haptics, parallax or the local best changes.
+            // Only a real change is worth a trip to the main thread.
+            if (field == value) return
             field = value
             main.post { if (value) applyTrack(desiredTrack) else stopMusicInternal() }
         }
@@ -105,11 +119,17 @@ class AudioEngine(context: Context) {
 
     /** Pauses the loop without forgetting which one should resume (for onPause). */
     fun pauseMusic() {
-        main.post { runCatching { player?.takeIf { it.isPlaying }?.pause() } }
+        main.post {
+            lifecyclePaused = true
+            runCatching { player?.takeIf { it.isPlaying }?.pause() }
+        }
     }
 
     fun resumeMusic() {
-        main.post { if (musicEnabled) applyTrack(desiredTrack) }
+        main.post {
+            lifecyclePaused = false
+            if (musicEnabled) applyTrack(desiredTrack)
+        }
     }
 
     private fun applyTrack(track: Track) {
@@ -118,7 +138,16 @@ class AudioEngine(context: Context) {
             return
         }
         if (track == currentTrack && player != null) {
-            runCatching { player?.takeIf { !it.isPlaying }?.start() }
+            // Already loaded: nudge it back into playing. Still loading: leave it alone and
+            // let onPrepared start it. start() on a preparing MediaPlayer is an illegal
+            // transition — the engine reports an error and parks the object in the Error
+            // state, after which onPrepared never arrives and the track is silently dead for
+            // the rest of the session. Two playTrack calls landing back to back is ordinary
+            // (a navigation posts one and the screen's effect posts another), so this was
+            // reachable on essentially every menu.
+            if (!preparing && !lifecyclePaused) {
+                runCatching { player?.takeIf { !it.isPlaying }?.start() }
+            }
             return
         }
         stopMusicInternal()
@@ -128,6 +157,9 @@ class AudioEngine(context: Context) {
             Track.GAME -> "audio/GAME.ogg"
             Track.NONE -> return
         }
+        // prepareAsync, not prepare: these are multi-megabyte OGGs and this runs on the main
+        // thread, so a synchronous prepare stalls the UI at every track change and on resume.
+        val token = ++generation
         player = runCatching {
             MediaPlayer().apply {
                 assets.openFd(asset).use { fd ->
@@ -141,19 +173,48 @@ class AudioEngine(context: Context) {
                 )
                 isLooping = true
                 setVolume(MUSIC_VOLUME, MUSIC_VOLUME)
-                setOnErrorListener { _, what, extra ->
+                setOnErrorListener { failed, what, extra ->
                     Log.w(TAG, "MediaPlayer error $what/$extra on $asset")
+                    // Leave nothing behind in the Error state: a failed player can never be
+                    // started again, so drop it and let the next playTrack build a fresh one
+                    // rather than poke at a corpse. Posted rather than run inline because an
+                    // error can come back synchronously from prepareAsync, before this player
+                    // has been assigned to the field the teardown is meant to clear.
+                    main.post {
+                        if (token == generation) {
+                            stopMusicInternal()
+                        } else {
+                            runCatching { failed.release() }
+                        }
+                    }
                     true
                 }
-                prepare()
-                start()
+                setOnPreparedListener { prepared ->
+                    // The track may have been switched, or the app backgrounded, while this
+                    // was loading. A stale player is nobody's job but ours to release.
+                    if (token != generation) {
+                        runCatching { prepared.release() }
+                        return@setOnPreparedListener
+                    }
+                    preparing = false
+                    if (musicEnabled && !lifecyclePaused) runCatching { prepared.start() }
+                }
+                preparing = true
+                prepareAsync()
             }
         }.onFailure { Log.w(TAG, "Could not start $asset", it) }.getOrNull()
 
-        currentTrack = if (player != null) track else Track.NONE
+        if (player == null) {
+            preparing = false
+            currentTrack = Track.NONE
+        } else {
+            currentTrack = track
+        }
     }
 
     private fun stopMusicInternal() {
+        generation++
+        preparing = false
         player?.let { mp ->
             runCatching { if (mp.isPlaying) mp.stop() }
             runCatching { mp.release() }

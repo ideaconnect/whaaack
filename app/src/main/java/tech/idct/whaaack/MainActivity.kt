@@ -35,6 +35,7 @@ import androidx.credentials.CredentialManager
 import androidx.credentials.GetCredentialRequest
 import androidx.credentials.exceptions.GetCredentialCancellationException
 import androidx.credentials.exceptions.GetCredentialException
+import androidx.credentials.exceptions.NoCredentialException
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
 import com.google.android.libraries.identity.googleid.GetGoogleIdOption
@@ -60,6 +61,12 @@ class MainActivity : ComponentActivity() {
 
     private val vm: WhaaackViewModel by viewModels()
 
+    /**
+     * A recovery link must not be consumed twice. The launch Intent is redelivered on every
+     * recreation, so without this a rotation re-applied the tokens and re-navigated.
+     */
+    private var deepLinkHandled = false
+
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
@@ -67,7 +74,11 @@ class MainActivity : ComponentActivity() {
         // GDPR consent has to be resolved before the Ads SDK may request anything.
         vm.gatherConsent(this, debugDeviceHashedId = null)
 
-        handleDeepLink(intent)
+        deepLinkHandled = savedInstanceState?.getBoolean(KEY_DEEP_LINK_HANDLED) == true
+        if (!deepLinkHandled) {
+            handleDeepLink(intent)
+            deepLinkHandled = true
+        }
 
         setContent {
             WhaaackTheme {
@@ -76,9 +87,15 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        outState.putBoolean(KEY_DEEP_LINK_HANDLED, deepLinkHandled)
+    }
+
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
+        // A fresh Intent is a fresh link, so this one is always ours to handle.
         handleDeepLink(intent)
     }
 
@@ -131,11 +148,20 @@ class MainActivity : ComponentActivity() {
                 vm.signInWithGoogle(credential.idToken, rawNonce)
             } catch (_: GetCredentialCancellationException) {
                 // Player dismissed the sheet; nothing to report.
+            } catch (_: NoCredentialException) {
+                // No Google account on the device: an empty picker, not a failure. Point
+                // them at the form instead of showing an error they cannot act on.
+                vm.setAuthMode(AuthMode.SIGN_UP)
+                vm.go(Screen.AUTH)
             } catch (e: GetCredentialException) {
                 Log.w("MainActivity", "Google sign-in failed", e)
                 vm.reportGoogleFailure(e.message)
             }
         }
+    }
+
+    private companion object {
+        const val KEY_DEEP_LINK_HANDLED = "deep_link_handled"
     }
 }
 
@@ -147,6 +173,17 @@ private fun WhaaackApp(vm: WhaaackViewModel, onGoogleSignIn: () -> Unit) {
     val googleAvailable = remember { BuildConfig.GOOGLE_WEB_CLIENT_ID.isNotBlank() }
 
     BackHandler(enabled = state.screen != Screen.HOME) { vm.onBack() }
+
+    // Above the branch below, which returns early for the game screen: this is the one place
+    // the music track is chosen, so it has to be reached whatever is on screen.
+    LaunchedEffect(state.screen) {
+        vm.audio.playTrack(
+            if (state.screen == Screen.GAME) AudioEngine.Track.GAME else AudioEngine.Track.MENU,
+        )
+    }
+    LaunchedEffect(state.signedIn) {
+        if (state.signedIn) vm.refreshBoard(BoardScope.ALL_TIME)
+    }
 
     // Menus share the orchard backdrop; the game screen paints its own.
     if (state.screen == Screen.GAME) {
@@ -162,7 +199,6 @@ private fun WhaaackApp(vm: WhaaackViewModel, onGoogleSignIn: () -> Unit) {
                 onStrike = { vm.onStrikeFeedback() },
                 onGameOver = { vm.onRunFinished(it) },
                 onLose = { vm.onLose() },
-                onQuit = { },
             )
         }
         return
@@ -211,7 +247,8 @@ private fun WhaaackApp(vm: WhaaackViewModel, onGoogleSignIn: () -> Unit) {
                 Screen.GAME_OVER -> state.lastRun?.let { run ->
                     GameOverScreen(
                         run = run,
-                        adsAvailable = vm.consent.canRequestAds,
+                        signedIn = state.signedIn,
+                        adsAvailable = state.adsAvailable,
                         onPlayAgain = { activity?.let { vm.playAgain(it) } },
                         onHome = { activity?.let { vm.backHome(it) } },
                         onSignIn = { vm.go(Screen.AUTH) },
@@ -227,19 +264,20 @@ private fun WhaaackApp(vm: WhaaackViewModel, onGoogleSignIn: () -> Unit) {
 
                 Screen.SETTINGS -> SettingsScreen(
                     state = state,
-                    privacyOptionsRequired = vm.consent.isPrivacyOptionsRequired,
+                    privacyOptionsRequired = state.privacyOptionsRequired,
                     onBack = { vm.go(Screen.HOME) },
                     onAbout = { vm.go(Screen.ABOUT) },
                     onToggleSound = { vm.toggleSound(it) },
                     onToggleMusic = { vm.toggleMusic(it) },
                     onToggleHaptics = { vm.toggleHaptics(it) },
                     onToggleParallax = { vm.toggleParallax(it) },
-                    onPrivacyOptions = { activity?.let { vm.consent.showPrivacyOptions(it) } },
+                    onPrivacyOptions = { activity?.let { vm.showPrivacyOptions(it) } },
                     onChangeName = { vm.changeDisplayName(it) },
                     onChangeEmail = { vm.changeEmail(it) },
                     onChangePassword = { vm.changePassword(it) },
                     onDeleteAccount = { vm.deleteAccount() },
                     onLogout = { vm.signOut() },
+                    onClearError = { vm.clearAuthError() },
                 )
 
                 Screen.ABOUT -> AboutScreen(onBack = { vm.go(Screen.SETTINGS) })
@@ -249,13 +287,6 @@ private fun WhaaackApp(vm: WhaaackViewModel, onGoogleSignIn: () -> Unit) {
 
             Toast(state.toast) { vm.consumeToast() }
         }
-    }
-
-    LaunchedEffect(state.screen) {
-        if (state.screen != Screen.GAME) vm.audio.playTrack(AudioEngine.Track.MENU)
-    }
-    LaunchedEffect(state.signedIn) {
-        if (state.signedIn) vm.refreshBoard(BoardScope.ALL_TIME)
     }
 }
 

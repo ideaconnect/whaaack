@@ -70,8 +70,15 @@ What was verified:
   as the password.
 - Despite that, Supabase still reports `Error sending confirmation email`, and
   `supabase config push` reports "Remote Auth config is up to date" *even with
-  `RESEND_API_KEY` unset* — so the CLI is not reliably transmitting the secret through
-  `pass = "env(RESEND_API_KEY)"`.
+  `RESEND_API_KEY` unset*.
+
+**Why the push does nothing:** before diffing, the CLI replaces every local secret with the
+value the remote already holds — so a change that touches *only* a secret compares equal to
+the remote and nothing is sent. `pass = "env(RESEND_API_KEY)"` can therefore never be pushed
+on its own. It rides along only when some other, visible field also changed, and then the
+whole body goes up at once. Enabling Google (section 3) is exactly such a change, so that
+push should carry the password too — which also means `RESEND_API_KEY` must be exported when
+you run it, or the literal string `env(RESEND_API_KEY)` gets written as the password.
 
 **Fix:** paste the key directly in the dashboard —
 Supabase → Authentication → Emails → SMTP Settings:
@@ -107,29 +114,83 @@ deletion cascade.
 The app implements the native Credential Manager flow, including nonce hashing. It stays
 disabled until the OAuth clients exist — the button greys out rather than failing.
 
-1. **Google Cloud console** → APIs & Services → Credentials, in the project you want to own
-   these identities.
-2. Create an **OAuth client ID → Android**:
-   - package name `tech.idct.whaaack`
-   - SHA-1 of your signing certificate. For debug:
-     ```bash
-     keytool -list -v -alias androiddebugkey \
-       -keystore ~/.android/debug.keystore -storepass android -keypass android
-     ```
-     Add the release certificate's SHA-1 too (including Play App Signing's, from the Play
-     Console) before shipping.
-3. Create a second **OAuth client ID → Web application**. This is the one Supabase verifies
-   ID tokens against.
-4. Put the **web** client id in `local.properties` as `GOOGLE_WEB_CLIENT_ID`.
-5. Enable the provider in Supabase:
-   ```bash
-   # in supabase/config.toml set [auth.external.google] enabled = true
-   GOOGLE_CLIENT_ID=<web client id> \
-   GOOGLE_CLIENT_SECRET=<web client secret> \
-   RESEND_API_KEY=... supabase config push
-   ```
-   Add the **Android** client id to the provider's *Authorized Client IDs* list as well, so
-   Supabase accepts tokens minted for the native app.
+Two clients are needed, in Google Cloud project **`whaaack-505409`** (APIs & Services →
+Credentials). They play different roles and are easy to mix up: the **web** client is the
+identity Supabase verifies ID tokens against and the one compiled into the app, while the
+**Android** client is the audience Google actually mints the token for.
+
+### Done: Android client
+
+`964578061899-o3srji4j87lltkc3bphbsv6o6hj4t9b1.apps.googleusercontent.com`
+
+Package `tech.idct.whaaack`. Confirm it carries this machine's debug SHA-1, or debug builds
+get no credential back:
+
+```
+A8:87:91:6F:1B:42:11:BA:82:4F:C8:5B:0A:8A:83:DC:BD:9B:07:EB
+```
+
+```bash
+keytool -list -v -alias androiddebugkey \
+  -keystore ~/.android/debug.keystore -storepass android -keypass android
+```
+
+Each developer's debug certificate is different, so every machine that needs a working
+debug sign-in adds its own SHA-1 here. Add the release certificate's SHA-1 too — including
+Play App Signing's, from the Play Console — before shipping.
+
+### Done: web client
+
+`964578061899-aaiu8iv8u6fngd93to4vkma91abip7k8.apps.googleusercontent.com`
+
+Its secret is in the downloaded JSON under `secrets/` (git-ignored). This is the id the app
+compiles in — `GOOGLE_WEB_CLIENT_ID` in `local.properties`, already set — and the one
+Supabase verifies ID tokens against.
+
+It was created with `https://…supabase.co/auth/v1/callback` as a redirect URI, which is
+unused by the native flow and auto-added `supabase.co` to the consent screen's authorized
+domains. Harmless while the app needs no verification review; drop both if you ever want
+that list to contain only domains you own.
+
+### Still to do: push the provider
+
+`enabled = true` is already set under `[auth.external.google]`. The remote still needs it:
+
+```bash
+GOOGLE_CLIENT_ID="964578061899-aaiu8iv8u6fngd93to4vkma91abip7k8.apps.googleusercontent.com,964578061899-o3srji4j87lltkc3bphbsv6o6hj4t9b1.apps.googleusercontent.com" \
+GOOGLE_CLIENT_SECRET="<web secret from secrets/>" \
+RESEND_API_KEY="<resend key>" \
+supabase config push
+```
+
+Both ids go in `GOOGLE_CLIENT_ID`, web first — the remote splits on the comma into the
+client id plus the dashboard's *Authorized Client IDs*, which is what makes Supabase accept
+a token minted for the native app. See the note in `config.toml` for why they cannot be two
+separate variables.
+
+### Consent screen
+
+Publish it to **Production**. While it is in Testing only accounts explicitly listed as
+testers can sign in. The flow requests just `openid`/`email`/`profile`, all non-sensitive,
+so publishing needs no verification review.
+
+**Authorized domains: `idct.tech`, and nothing Supabase-related.** That list gates only the
+domains used in redirect URIs and in the homepage / privacy / terms links. Nothing here
+redirects through a browser — Credential Manager returns the ID token in-process and the app
+posts it to `grant_type=id_token` — so the web client needs no redirect URI, and
+`supabase.co` never has to be authorized. Don't add the `/auth/v1/callback` URI "just in
+case": it would drag `supabase.co` into a list where every entry has to be a domain you can
+prove you own.
+
+Enter the domain as the bare eTLD+1 (`idct.tech`, not `www.idct.tech`, not a URL), and add it
+*before* pasting the privacy policy link or the field will be rejected. The logo matters more
+than it looks: in the native flow it is what appears on the account-picker sheet.
+
+> `RESEND_API_KEY` is not optional in that command even though it looks unrelated. Any
+> unset `env(...)` is pushed as the literal string `env(RESEND_API_KEY)`, which would
+> replace the SMTP password with nonsense. The flip side is useful: because enabling Google
+> is a *visible* change, this push finally carries the SMTP password with it — see the note
+> in section 2 on why a secret-only push does nothing.
 
 On first Google sign-in the signup trigger seeds the display name from the Google account
 name, de-duplicating it if taken. The player can change it later in Settings.
@@ -139,12 +200,23 @@ name, de-duplicating it if taken. The player can change it later in Settings.
 ## 4. AdMob
 
 Already wired: app id `ca-app-pub-6904561240517963~2412756903` is injected into the
-manifest, and the rewarded interstitial unit is
-`ca-app-pub-6904561240517963/7453330598`.
+manifest, and the interstitial unit is `ca-app-pub-6904561240517963/2703686934`.
 
-> The configured unit must be of type **Rewarded Interstitial** in the AdMob console. If it
-> was created as a plain Rewarded or Interstitial unit it will never fill, and the app will
+> The configured unit must be of type **Interstitial** in the AdMob console. If it was
+> created as a Rewarded or Rewarded Interstitial unit it will never fill, and the app will
 > silently skip the ad (navigation is never blocked by advertising).
+
+The placement used to be a *rewarded* interstitial that granted no reward, which is a format
+mismatch AdMob's policies take a dim view of — the rewarded formats expect an explicit value
+exchange. It is now a plain interstitial, which is what the placement always behaved like.
+
+Debug builds override the unit with Google's reserved always-fill interstitial test id
+(`ca-app-pub-3940256099942544/1033173712`), so development never touches live inventory. The
+format of the test id has to match the format the code loads, or it will never fill either.
+
+`AdsManager` shows at most one ad every two minutes. Both routes off the game-over screen ask
+for one, so without that cap a player alternating "Play again" with a thirty-second run would
+see an ad between every attempt.
 
 ### EU consent — no extra ID needed
 
@@ -202,8 +274,14 @@ adb shell am start -a android.intent.action.VIEW \
 ## 6. Before release
 
 - [ ] Fix SMTP (section 2) — signup is broken without it
-- [ ] Configure Google OAuth clients (section 3)
-- [ ] Confirm the AdMob unit is a Rewarded Interstitial (section 4)
+- [x] Google **Android** OAuth client (section 3)
+- [x] Google **web** OAuth client and `GOOGLE_WEB_CLIENT_ID` (section 3)
+- [ ] `supabase config push` to enable the Google provider remotely (section 3)
+- [ ] Publish the Google OAuth consent screen to Production (section 3)
+- [ ] Confirm the AdMob unit `…/2703686934` is of type **Interstitial** (section 4)
 - [ ] Publish the privacy policy at `https://idct.tech/whaaack/privacy` (linked from About)
 - [ ] Create a release keystore, add its SHA-1 to the Google Android OAuth client
 - [ ] Bump `versionCode` / `versionName` in `app/build.gradle.kts`
+- [ ] Upload `assets/icon/play-store-512.png` as the Play Console store icon — it is
+      generated alongside the launcher icons and is not part of the APK
+      (`python tools/generate_launcher_icons.py`)

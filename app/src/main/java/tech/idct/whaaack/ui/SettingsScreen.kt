@@ -18,6 +18,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -55,6 +56,7 @@ fun SettingsScreen(
     onChangePassword: (String) -> Unit,
     onDeleteAccount: () -> Unit,
     onLogout: () -> Unit,
+    onClearError: () -> Unit,
 ) {
     var sheet by remember { mutableStateOf(Sheet.NONE) }
 
@@ -210,6 +212,17 @@ fun SettingsScreen(
             }
         }
 
+        // The sheet stays up until the request actually resolves. Dismissing it inside
+        // onConfirm meant the busy state and any error had nowhere left to appear, so a
+        // failed change looked exactly like a successful one.
+        LaunchedEffect(state.actionSucceeded) {
+            if (sheet != Sheet.NONE) sheet = Sheet.NONE
+        }
+        val dismissSheet: () -> Unit = {
+            sheet = Sheet.NONE
+            onClearError()
+        }
+
         when (sheet) {
             Sheet.NAME -> EditSheet(
                 title = "Change display name",
@@ -219,8 +232,8 @@ fun SettingsScreen(
                 cta = "Save name",
                 busy = state.busy,
                 error = state.authError?.body,
-                onDismiss = { sheet = Sheet.NONE },
-                onConfirm = { onChangeName(it); sheet = Sheet.NONE },
+                onDismiss = dismissSheet,
+                onConfirm = { onChangeName(it) },
             )
 
             Sheet.EMAIL -> EditSheet(
@@ -232,8 +245,8 @@ fun SettingsScreen(
                 cta = "Send confirmation",
                 busy = state.busy,
                 error = state.authError?.body,
-                onDismiss = { sheet = Sheet.NONE },
-                onConfirm = { onChangeEmail(it); sheet = Sheet.NONE },
+                onDismiss = dismissSheet,
+                onConfirm = { onChangeEmail(it) },
             )
 
             Sheet.PASSWORD -> EditSheet(
@@ -245,13 +258,15 @@ fun SettingsScreen(
                 isPassword = true,
                 busy = state.busy,
                 error = state.authError?.body,
-                onDismiss = { sheet = Sheet.NONE },
-                onConfirm = { onChangePassword(it); sheet = Sheet.NONE },
+                onDismiss = dismissSheet,
+                onConfirm = { onChangePassword(it) },
             )
 
             Sheet.DELETE -> DeleteSheet(
-                onDismiss = { sheet = Sheet.NONE },
-                onConfirm = { onDeleteAccount(); sheet = Sheet.NONE },
+                busy = state.busy,
+                error = state.authError?.body,
+                onDismiss = dismissSheet,
+                onConfirm = { onDeleteAccount() },
             )
 
             Sheet.NONE -> Unit
@@ -341,9 +356,14 @@ private fun EditSheet(
 }
 
 @Composable
-private fun DeleteSheet(onDismiss: () -> Unit, onConfirm: () -> Unit) {
+private fun DeleteSheet(
+    busy: Boolean,
+    error: String?,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit,
+) {
     var typed by remember { mutableStateOf("") }
-    val armed = typed.trim().equals("DELETE", ignoreCase = false)
+    val armed = typed.trim().equals("DELETE", ignoreCase = false) && !busy
 
     SheetScaffold(onDismiss, background = Color(0xFF1B1420), borderColor = Color(0x80FF8A7A)) {
         Text("Delete everything?", color = Color(0xFFFFC7BE), fontSize = 26.sp, fontWeight = FontWeight.Black)
@@ -355,6 +375,10 @@ private fun DeleteSheet(onDismiss: () -> Unit, onConfirm: () -> Unit) {
             fontSize = 13.sp,
             lineHeight = 19.sp,
         )
+        if (error != null) {
+            Spacer(Modifier.height(14.dp))
+            ErrorBanner("That didn't work", error)
+        }
         Spacer(Modifier.height(16.dp))
         FieldLabel("Type DELETE to confirm")
         WhaaackField(value = typed, onValueChange = { typed = it }, placeholder = "DELETE")
@@ -369,7 +393,7 @@ private fun DeleteSheet(onDismiss: () -> Unit, onConfirm: () -> Unit) {
             contentAlignment = Alignment.Center,
         ) {
             Text(
-                "Delete my account",
+                if (busy) "Deleting…" else "Delete my account",
                 color = if (armed) Cream else Color(0x66FFF3E6),
                 fontSize = 19.sp,
                 fontWeight = FontWeight.Black,

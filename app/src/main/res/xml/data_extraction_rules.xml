@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Cloud backup and device-to-device transfer on Android 12 and above. Same rule as
+    backup_rules.xml: settings travel, the signed-in session does not.
+-->
+<data-extraction-rules>
+    <cloud-backup>
+        <include domain="file" path="datastore/whaaack_settings.preferences_pb" />
+    </cloud-backup>
+    <device-transfer>
+        <include domain="file" path="datastore/whaaack_settings.preferences_pb" />
+    </device-transfer>
+</data-extraction-rules>

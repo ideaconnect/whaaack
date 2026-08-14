@@ -28,6 +28,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.net.toUri
 import tech.idct.whaaack.R
 import tech.idct.whaaack.ui.theme.AccentLight
 import tech.idct.whaaack.ui.theme.Cream
@@ -57,7 +58,7 @@ fun AboutScreen(onBack: () -> Unit) {
             context.startActivity(
                 android.content.Intent(
                     android.content.Intent.ACTION_VIEW,
-                    android.net.Uri.parse(url),
+                    url.toUri(),
                 ),
             )
         }
@@ -88,12 +89,14 @@ fun AboutScreen(onBack: () -> Unit) {
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
+                // Not the launcher foreground: that one is padded out to the
+                // adaptive-icon safe zone, so it would draw a third smaller
+                // than this box with no way to reclaim the margin. This asset
+                // is the same artwork bled to its own edges.
                 Image(
-                    painter = painterResource(R.mipmap.ic_launcher_foreground),
+                    painter = painterResource(R.drawable.logo_whaaack),
                     contentDescription = "Whaaack! logo",
-                    modifier = Modifier
-                        .size(132.dp)
-                        .clip(RoundedCornerShape(26.dp)),
+                    modifier = Modifier.size(132.dp),
                 )
                 Text("Whaaack!", color = Cream, fontSize = 28.sp, fontWeight = FontWeight.Black)
                 Text(

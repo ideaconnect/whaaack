@@ -75,12 +75,49 @@ class AuthRepository(private val client: SupabaseClient) {
 
     val isConfigured: Boolean get() = client.isConfigured
 
-    /** Restores a persisted session on launch; safe to call when signed out. */
-    suspend fun restore() {
-        if (!client.isConfigured) return
+    /**
+     * Settles signed-in vs signed-out from the persisted session alone, and returns whether
+     * one was adopted.
+     *
+     * Deliberately a local read. The launch screen has to choose between the ranked buttons
+     * and the signed-out ones, and resolving that through a profile round trip meant showing
+     * the wrong pair for as long as the network took. [refreshProfile] catches the details
+     * up afterwards. Safe to call when signed out.
+     */
+    suspend fun restore(): Boolean {
+        if (!client.isConfigured) return false
+        val session = client.currentSession() ?: return false
+        _player.value = session.toPlayer()
+        return true
+    }
+
+    /**
+     * Replaces the session-derived player with the profiles row.
+     *
+     * Only an outright rejection signs the player out: a request that merely fails means the
+     * cached name is stale, not that the account is gone, so a launch with no connection
+     * keeps the session instead of silently demoting the player to signed-out.
+     */
+    suspend fun refreshProfile() {
         val session = client.currentSession() ?: return
-        runCatching { loadProfile(session) }
-            .onFailure { _player.value = null }
+        try {
+            loadProfile(session)
+        } catch (e: SupabaseClient.SupabaseException) {
+            // A 401 here has already survived one refresh attempt inside the client, so the
+            // session cannot be recovered.
+            if (e.status == 401) {
+                client.clearSession()
+                _player.value = null
+            }
+        } catch (_: java.io.IOException) {
+            // Offline; keep what the persisted session told us.
+            return
+        }
+        // A refresh token the server rejects makes the client drop the session mid-request,
+        // and the retry then goes out with the anon key — which RLS answers with an empty
+        // row set rather than a 401. Without this the player would look signed in with no
+        // session behind them.
+        if (client.currentSession() == null) _player.value = null
     }
 
     suspend fun signUpWithEmail(email: String, password: String, displayName: String) {
@@ -167,6 +204,9 @@ class AuthRepository(private val client: SupabaseClient) {
             )
         }
         _player.value = _player.value?.copy(displayName = newName.trim())
+        // Keep the launch-time cache in step, or the next start shows the old name until
+        // the profile request lands.
+        client.cacheDisplayName(newName.trim())
     }
 
     suspend fun updateEmail(newEmail: String) {
@@ -195,15 +235,29 @@ class AuthRepository(private val client: SupabaseClient) {
             authorized = true,
         )
         val row = client.json.parseToJsonElement(raw).jsonArray.firstOrNull()?.jsonObject
-        _player.value = Player(
-            userId = session.userId,
-            email = session.email,
+        val player = session.toPlayer(
             // The signup trigger always writes one, but fall back rather than crash.
-            displayName = row?.str("display_name") ?: session.email?.substringBefore('@')
-                ?: "Player",
-            provider = row?.str("provider") ?: session.provider,
+            displayName = row?.str("display_name"),
+            provider = row?.str("provider"),
         )
+        _player.value = player
+        // Cache it so the next launch can name the player before the network answers.
+        if (player.displayName != session.displayName) {
+            client.cacheDisplayName(player.displayName)
+        }
     }
+
+    /**
+     * The player as the session alone describes them, with [displayName] and [provider]
+     * overriding the cached values when the profiles row has answered.
+     */
+    private fun Session.toPlayer(displayName: String? = null, provider: String? = null) = Player(
+        userId = userId,
+        email = email,
+        displayName = displayName ?: this.displayName ?: email?.substringBefore('@')
+            ?: "Player",
+        provider = provider ?: this.provider,
+    )
 
     private fun validate(email: String, password: String) {
         if (!email.contains('@') || email.substringAfter('@').length < 3) {

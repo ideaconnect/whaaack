@@ -42,8 +42,8 @@ android {
         buildConfigField("String", "SUPABASE_ANON_KEY", "\"${secret("SUPABASE_ANON_KEY")}\"")
         buildConfigField(
             "String",
-            "ADMOB_REWARDED_AD_UNIT_ID",
-            "\"${secret("ADMOB_REWARDED_AD_UNIT_ID", "ca-app-pub-6904561240517963/7453330598")}\"",
+            "ADMOB_INTERSTITIAL_AD_UNIT_ID",
+            "\"${secret("ADMOB_INTERSTITIAL_AD_UNIT_ID", "ca-app-pub-6904561240517963/2703686934")}\"",
         )
         // Supabase hands out a Google *Web* client id to verify ID tokens against.
         buildConfigField(
@@ -55,11 +55,13 @@ android {
 
     buildTypes {
         debug {
-            // Google's reserved always-fill test unit, so debug runs never touch live inventory.
+            // Google's reserved always-fill test unit, so debug runs never touch live
+            // inventory. This is the *Interstitial* test id; the format has to match the
+            // one the code loads or it never fills.
             buildConfigField(
                 "String",
-                "ADMOB_REWARDED_AD_UNIT_ID",
-                "\"ca-app-pub-3940256099942544/5354046379\"",
+                "ADMOB_INTERSTITIAL_AD_UNIT_ID",
+                "\"ca-app-pub-3940256099942544/1033173712\"",
             )
         }
         release {
@@ -125,4 +127,7 @@ dependencies {
     implementation(libs.androidx.credentials)
     implementation(libs.androidx.credentials.play.services.auth)
     implementation(libs.googleid)
+
+    // GameEngine is deliberately free of Android types, so its rules are testable on the JVM.
+    testImplementation(libs.junit)
 }

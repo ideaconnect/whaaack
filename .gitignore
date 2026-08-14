@@ -12,6 +12,13 @@ captures/
 *.keystore
 !debug.keystore
 
+# Regenerate with: python tools/generate_launcher_icons.py --preview
+tools/icon-preview.png
+tools/__pycache__/
+
+# Downloaded OAuth client JSON and anything else handed to us out of band.
+secrets/
+
 # Supabase CLI writes resolved credentials here.
 supabase/.temp/
 supabase/.branches/

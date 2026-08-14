@@ -38,7 +38,6 @@ import tech.idct.whaaack.UiState
 import tech.idct.whaaack.ui.theme.AccentInk
 import tech.idct.whaaack.ui.theme.AccentLight
 import tech.idct.whaaack.ui.theme.Cream
-import tech.idct.whaaack.ui.theme.DangerSoft
 
 @Composable
 fun AuthScreen(
@@ -276,18 +275,5 @@ fun ForgotPasswordScreen(
                 SecondaryButton("Back to sign in", onClick = onDone)
             }
         }
-    }
-}
-
-@Composable
-fun AuthBusyOverlay(visible: Boolean) {
-    if (!visible) return
-    Box(
-        Modifier
-            .fillMaxSize()
-            .background(Color(0x8C0C0610)),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text("…", color = DangerSoft, fontSize = 40.sp)
     }
 }

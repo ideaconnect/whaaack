@@ -7,10 +7,13 @@ import android.graphics.Color
 import android.graphics.LinearGradient
 import android.graphics.Matrix
 import android.graphics.Paint
+import android.graphics.RadialGradient
 import android.graphics.Rect
 import android.graphics.RectF
 import android.graphics.Shader
 import android.graphics.Typeface
+import androidx.core.graphics.withClip
+import androidx.core.graphics.withTranslation
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.random.Random
@@ -40,7 +43,13 @@ class GameRenderer(private val density: Float) {
         isFilterBitmap = false
         isDither = false
     }
-    private val splatPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val splatPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        // Unlike the fruit, the splat masks are 256px organic blobs drawn rotated to an
+        // arbitrary angle and scaled down — not pixel art at 1:1. Paint(flags) sets exactly
+        // the flags given, so filtering was off and every splat came out with a visibly
+        // stair-stepped rotated edge.
+        isFilterBitmap = true
+    }
     private val stroke = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
         strokeWidth = dp(1f)
@@ -71,6 +80,21 @@ class GameRenderer(private val density: Float) {
     private val skyMatrix = Matrix()
     private val treeMatrix = Matrix()
     private val hillMatrix = Matrix()
+
+    /**
+     * Full-viewport shaders, rebuilt only when the surface changes size.
+     *
+     * Constructing a gradient allocates a native Shader, so anything built inside [draw]
+     * costs one of those every frame. The speed bar's gradient is kept in unit space and
+     * re-aimed with [barMatrix], and the strike flash is drawn at full strength and faded
+     * with the Paint's alpha, which modulates the shader identically.
+     */
+    private var scrimShader: LinearGradient? = null
+    private var strikeShader: RadialGradient? = null
+    private val barGradient = LinearGradient(
+        0f, 0f, 1f, 0f, accentLight, accentDark, Shader.TileMode.CLAMP,
+    )
+    private val barMatrix = Matrix()
 
     private var width = 0
     private var height = 0
@@ -114,6 +138,21 @@ class GameRenderer(private val density: Float) {
         treeShader = BitmapShader(assets.trees, Shader.TileMode.REPEAT, Shader.TileMode.CLAMP)
         hillShader = BitmapShader(assets.hills, Shader.TileMode.REPEAT, Shader.TileMode.CLAMP)
 
+        scrimShader = LinearGradient(
+            0f, 0f, 0f, h.toFloat(),
+            intArrayOf(0x6B091428, 0x1A091428, 0x57091428),
+            floatArrayOf(0f, 0.34f, 1f),
+            Shader.TileMode.CLAMP,
+        )
+        strikeShader = RadialGradient(
+            w / 2f,
+            h * 0.5f,
+            maxOf(w, h) * 0.75f,
+            intArrayOf(Color.argb(46, 226, 87, 76), Color.argb(168, 178, 42, 48)),
+            floatArrayOf(0f, 1f),
+            Shader.TileMode.CLAMP,
+        )
+
         val sidePad = dp(16f)
         val cardTop = safeTop + dp(14f) + dp(28f) + dp(12f)
         cardRect.set(sidePad, cardTop, w - sidePad, cardTop + dp(104f))
@@ -135,7 +174,10 @@ class GameRenderer(private val density: Float) {
 
         val sizeFromWidth = (maxBoardWidth - 2 * boardInset - 3 * tileGap) / 4f
         val sizeFromHeight = (maxBoardHeight - 2 * boardInset - 3 * tileGap) / 4f
-        tileSize = min(sizeFromWidth, sizeFromHeight)
+        // Clamped: a viewport too short to hold the card, the board and the pill leaves no
+        // room at all, and a negative tile size feeds inverted rects to every draw call and
+        // an inverted destination to every drawBitmap.
+        tileSize = min(sizeFromWidth, sizeFromHeight).coerceAtLeast(0f)
 
         val boardW = tileSize * 4 + tileGap * 3 + boardInset * 2
         val boardH = boardW
@@ -149,17 +191,20 @@ class GameRenderer(private val density: Float) {
         label.textSize = dp(11f)
     }
 
-    /** Maps a touch point to a board tile, or -1 when the tap missed the grid. */
+    /**
+     * Maps a touch point to a board tile, or -1 when the tap landed off the board entirely.
+     *
+     * Every point inside the board card belongs to a tile, gutters and padding included.
+     * Tapping bare board costs the player nothing, so refusing a near-miss could never help
+     * them and could only turn a whack they meant into a strike they did not: the gutters
+     * used to be dead, which at four fruit and a 200 ms cycle is a lot of stolen hits.
+     */
     fun tileAt(x: Float, y: Float): Int {
         if (tileSize <= 0f) return -1
-        val col = ((x - boardLeft) / (tileSize + tileGap)).toInt()
-        val row = ((y - boardTop) / (tileSize + tileGap)).toInt()
-        if (col !in 0 until GameEngine.TILE_COLUMNS) return -1
-        if (row !in 0 until GameEngine.TILE_ROWS) return -1
-        // Reject the gutters so a near-miss does not register as a hit.
-        val left = boardLeft + col * (tileSize + tileGap)
-        val top = boardTop + row * (tileSize + tileGap)
-        if (x > left + tileSize || y > top + tileSize) return -1
+        if (!boardRect.contains(x, y)) return -1
+        val pitch = tileSize + tileGap
+        val col = ((x - boardLeft) / pitch).toInt().coerceIn(0, GameEngine.TILE_COLUMNS - 1)
+        val row = ((y - boardTop) / pitch).toInt().coerceIn(0, GameEngine.TILE_ROWS - 1)
         return row * GameEngine.TILE_COLUMNS + col
     }
 
@@ -184,7 +229,10 @@ class GameRenderer(private val density: Float) {
     // ---- background --------------------------------------------------------------------
 
     private fun advanceParallax(dtSec: Float, engine: GameEngine) {
-        val boost = 1f + engine.level * 0.18f
+        // Tied to the same saturating curve the speed bar reads, so the orchard stops
+        // accelerating at the point the run genuinely stops getting harder. Driving this
+        // off the raw level instead let it keep speeding up indefinitely.
+        val boost = 1f + GameEngine.speedFraction(engine.level) * 1.8f
         driftFar += dp(7f) * dtSec
         driftMid += dp(22f) * dtSec
         driftNear += dp(48f) * dtSec * boost
@@ -228,13 +276,9 @@ class GameRenderer(private val density: Float) {
     }
 
     private fun drawScrim(canvas: Canvas) {
+        val shader = scrimShader ?: return
         fill.reset()
-        fill.shader = LinearGradient(
-            0f, 0f, 0f, height.toFloat(),
-            intArrayOf(0x6B091428, 0x1A091428, 0x57091428),
-            floatArrayOf(0f, 0.34f, 1f),
-            Shader.TileMode.CLAMP,
-        )
+        fill.shader = shader
         canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), fill)
         fill.shader = null
     }
@@ -306,18 +350,25 @@ class GameRenderer(private val density: Float) {
 
         val fraction = GameEngine.speedFraction(engine.level)
         if (fraction > 0f) {
-            tmpRect.set(barLeft, barTop, barLeft + (barRight - barLeft) * fraction, barTop + barH)
-            fill.shader = LinearGradient(
-                tmpRect.left, 0f, tmpRect.right, 0f,
-                accentLight, accentDark, Shader.TileMode.CLAMP,
-            )
+            val filled = (barRight - barLeft) * fraction
+            tmpRect.set(barLeft, barTop, barLeft + filled, barTop + barH)
+            barMatrix.reset()
+            barMatrix.setScale(filled, 1f)
+            barMatrix.postTranslate(barLeft, 0f)
+            barGradient.setLocalMatrix(barMatrix)
+            fill.shader = barGradient
             canvas.drawRoundRect(tmpRect, barH / 2, barH / 2, fill)
             fill.shader = null
         }
 
         label.color = 0xBFFFF3E6.toInt()
         label.textAlign = Paint.Align.LEFT
-        canvas.drawText("SPEED ${engine.level + 1}", barLeft, barTop + dp(20f), label)
+        val speed = if (GameEngine.isTopSpeed(engine.level)) {
+            "TOP SPEED"
+        } else {
+            "SPEED ${GameEngine.displaySpeed(engine.level)}"
+        }
+        canvas.drawText(speed, barLeft, barTop + dp(20f), label)
         label.textAlign = Paint.Align.RIGHT
         canvas.drawText("${engine.hits} HITS", barRight, barTop + dp(20f), label)
     }
@@ -338,6 +389,7 @@ class GameRenderer(private val density: Float) {
     // ---- board -------------------------------------------------------------------------
 
     private fun drawBoard(canvas: Canvas, engine: GameEngine, assets: GameAssets, nowNs: Long) {
+        if (tileSize <= 0f) return
         fill.reset()
         fill.isAntiAlias = true
         fill.color = panel
@@ -409,10 +461,9 @@ class GameRenderer(private val density: Float) {
         dstRect.set(cx - drawSize / 2f, bottom - drawSize, cx + drawSize / 2f, bottom)
 
         sprite.alpha = (fade * 255).toInt().coerceIn(0, 255)
-        canvas.save()
-        canvas.clipRect(left, top, left + tileSize, top + tileSize)
-        canvas.drawBitmap(bitmap, srcRect, dstRect, sprite)
-        canvas.restore()
+        canvas.withClip(left, top, left + tileSize, top + tileSize) {
+            drawBitmap(bitmap, srcRect, dstRect, sprite)
+        }
         sprite.alpha = 255
     }
 
@@ -434,33 +485,32 @@ class GameRenderer(private val density: Float) {
         val cy = boardTop + row * (tileSize + tileGap) + tileSize * 0.52f
         val size = tileSize * 1.18f * pop
 
-        canvas.save()
-        canvas.translate(cx, cy)
-        canvas.rotate(splat.rotationDeg)
+        canvas.withTranslation(cx, cy) {
+            rotate(splat.rotationDeg)
 
-        // The mask is ALPHA_8, so the shader below supplies every pixel's colour.
-        val gradient = splatGradients.getOrPut(splat.fruit) {
-            LinearGradient(
-                0f, 0f, 1f, 1f,
-                intArrayOf(splat.fruit.splatLight, splat.fruit.splatLight, splat.fruit.splatDark),
-                floatArrayOf(0f, 0.38f, 1f),
-                Shader.TileMode.CLAMP,
-            )
+            // The mask is ALPHA_8, so the shader below supplies every pixel's colour.
+            val gradient = splatGradients.getOrPut(splat.fruit) {
+                LinearGradient(
+                    0f, 0f, 1f, 1f,
+                    intArrayOf(splat.fruit.splatLight, splat.fruit.splatLight, splat.fruit.splatDark),
+                    floatArrayOf(0f, 0.38f, 1f),
+                    Shader.TileMode.CLAMP,
+                )
+            }
+            shaderMatrix.reset()
+            shaderMatrix.setScale(size, size)
+            shaderMatrix.postTranslate(-size / 2f, -size / 2f)
+            gradient.setLocalMatrix(shaderMatrix)
+            splatPaint.shader = gradient
+            splatPaint.alpha = (alpha * 255).toInt().coerceIn(0, 255)
+
+            srcRect.set(0, 0, mask.width, mask.height)
+            dstRect.set(-size / 2f, -size / 2f, size / 2f, size / 2f)
+            drawBitmap(mask, srcRect, dstRect, splatPaint)
+
+            splatPaint.shader = null
+            splatPaint.alpha = 255
         }
-        shaderMatrix.reset()
-        shaderMatrix.setScale(size, size)
-        shaderMatrix.postTranslate(-size / 2f, -size / 2f)
-        gradient.setLocalMatrix(shaderMatrix)
-        splatPaint.shader = gradient
-        splatPaint.alpha = (alpha * 255).toInt().coerceIn(0, 255)
-
-        srcRect.set(0, 0, mask.width, mask.height)
-        dstRect.set(-size / 2f, -size / 2f, size / 2f, size / 2f)
-        canvas.drawBitmap(mask, srcRect, dstRect, splatPaint)
-
-        splatPaint.shader = null
-        splatPaint.alpha = 255
-        canvas.restore()
     }
 
     // ---- overlays ----------------------------------------------------------------------
@@ -470,23 +520,17 @@ class GameRenderer(private val density: Float) {
         if (since == 0L) return
         val ageMs = (nowNs - since) / 1_000_000f
         if (ageMs > GameEngine.STRIKE_FLASH_MS) return
+        val shader = strikeShader ?: return
         val t = 1f - ageMs / GameEngine.STRIKE_FLASH_MS
         fill.reset()
         // Strongest at the edges, so the centre of the board stays readable while the
-        // whole orchard still visibly pulses red.
-        fill.shader = android.graphics.RadialGradient(
-            width / 2f,
-            height * 0.5f,
-            maxOf(width, height) * 0.75f,
-            intArrayOf(
-                Color.argb((t * 46).toInt().coerceIn(0, 255), 226, 87, 76),
-                Color.argb((t * 168).toInt().coerceIn(0, 255), 178, 42, 48),
-            ),
-            floatArrayOf(0f, 1f),
-            Shader.TileMode.CLAMP,
-        )
+        // whole orchard still visibly pulses red. The gradient holds the flash at full
+        // strength; the Paint's alpha scales both stops, which is what the fade needs.
+        fill.shader = shader
+        fill.alpha = (t * 255).toInt().coerceIn(0, 255)
         canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), fill)
         fill.shader = null
+        fill.alpha = 255
     }
 
     private fun drawCountdown(canvas: Canvas, engine: GameEngine) {
@@ -532,17 +576,16 @@ class GameRenderer(private val density: Float) {
             val x = originX + piece.x0 + piece.vx * t
             val y = originY + piece.vy * t + 900f * density * t * t
 
-            canvas.save()
-            canvas.translate(x, y)
-            canvas.rotate(piece.spin * t)
-            srcRect.set(0, 0, bitmap.width, bitmap.height)
-            dstRect.set(
-                -piece.size / 2f, -piece.size / 2f, piece.size / 2f, piece.size / 2f,
-            )
-            sprite.alpha = (alpha * 255).toInt().coerceIn(0, 255)
-            canvas.drawBitmap(bitmap, srcRect, dstRect, sprite)
-            sprite.alpha = 255
-            canvas.restore()
+            canvas.withTranslation(x, y) {
+                rotate(piece.spin * t)
+                srcRect.set(0, 0, bitmap.width, bitmap.height)
+                dstRect.set(
+                    -piece.size / 2f, -piece.size / 2f, piece.size / 2f, piece.size / 2f,
+                )
+                sprite.alpha = (alpha * 255).toInt().coerceIn(0, 255)
+                drawBitmap(bitmap, srcRect, dstRect, sprite)
+                sprite.alpha = 255
+            }
         }
     }
 
@@ -562,6 +605,15 @@ class GameRenderer(private val density: Float) {
 
     fun reset() {
         burst = null
+        lastFrameNs = 0L
+    }
+
+    /**
+     * Drops the frame-delta baseline without touching the outro burst, so a run that is
+     * resumed after the surface was rebuilt does not see one enormous dt and jump the
+     * parallax forward by however long the app was away.
+     */
+    fun resetFrameClock() {
         lastFrameNs = 0L
     }
 }

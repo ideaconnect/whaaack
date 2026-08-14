@@ -3,7 +3,6 @@ package tech.idct.whaaack.game
 import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.Canvas
-import android.os.Build
 import android.util.AttributeSet
 import android.view.MotionEvent
 import android.view.SurfaceHolder
@@ -34,9 +33,13 @@ class GameSurfaceView @JvmOverloads constructor(
     attrs: AttributeSet? = null,
 ) : SurfaceView(context, attrs), SurfaceHolder.Callback {
 
+    /**
+     * [onHit] arrives on the render thread so the splat can be sounded the instant it is
+     * simulated; it must do nothing that could stall a frame. Everything else is delivered
+     * on the main thread.
+     */
     interface Callbacks {
         fun onGameOver(result: GameEngine.Result)
-        fun onQuit()
         fun onHit(fruit: Fruit)
         fun onStrike(strikes: Int)
     }
@@ -57,7 +60,13 @@ class GameSurfaceView @JvmOverloads constructor(
     @Volatile
     private var bottomInset = 0f
 
+    /** Set by [startRun], consumed by the render thread at the top of a frame. */
+    @Volatile
     private var pendingStart: Boolean? = null
+
+    private var drainDeadlineNs = 0L
+
+    @Volatile
     private var reportedOver = false
 
     init {
@@ -81,7 +90,10 @@ class GameSurfaceView @JvmOverloads constructor(
             }
 
             override fun onStrike(strikes: Int) {
-                callbacks?.onStrike(strikes)
+                // Hopped to the main thread: a strike drives haptics, and asking the system
+                // vibrator for anything is a binder round trip that must not sit inside a
+                // frame. A hit's audio stays inline because SoundPool.play does not block.
+                post { callbacks?.onStrike(strikes) }
             }
 
             override fun onGameOver(result: GameEngine.Result) {
@@ -98,39 +110,68 @@ class GameSurfaceView @JvmOverloads constructor(
         thread?.invalidateLayout()
     }
 
+    /**
+     * Queues a run. It is applied by the render thread rather than here even when one is
+     * already alive: [GameEngine.start] rewrites `slots` and `splats`, which that thread
+     * reads every frame, so doing it from the UI thread would be the same race that
+     * [quitRun] exists to avoid.
+     */
     fun startRun(ranked: Boolean) {
         reportedOver = false
-        renderer.reset()
-        if (thread == null) {
-            pendingStart = ranked
-        } else {
-            engine.start(ranked, System.nanoTime())
-        }
+        pendingStart = ranked
     }
 
     fun quitRun() {
-        engine.quit(System.nanoTime())
-        callbacks?.onQuit()
+        // Handled by the engine on the next frame rather than here: tearing the run down
+        // from the UI thread would rewrite `slots` and `phase` under the render thread.
+        engine.requestQuit()
     }
 
-    /** Stops the render thread and waits for it. Safe to call more than once. */
+    /**
+     * Stops the render thread, joins it, and suspends the run's clock. Safe to call more
+     * than once. Does not block for the buffer drain — see [awaitBufferDrain].
+     */
     fun stopRendering() {
         val running = thread
         thread = null
         if (running == null) return
         running.shutdown()
         // unlockCanvasAndPost hands the frame to HWUI's shared render thread, which finishes
-        // it asynchronously. Joining our own thread is therefore not enough: give that last
-        // frame a couple of vsyncs to drain before the caller lets the surface go, or its
-        // buffer is still dequeued when the buffer queue is destroyed.
-        android.os.SystemClock.sleep(HWUI_DRAIN_MS)
+        // it asynchronously, so the last buffer may still be dequeued for a few vsyncs after
+        // our own thread has gone. Note when that window closes rather than sleeping through
+        // it here: the only moment it has to have elapsed is before surfaceDestroyed returns.
+        drainDeadlineNs = System.nanoTime() + HWUI_DRAIN_MS * 1_000_000L
+        engine.pause(System.nanoTime())
+    }
+
+    /**
+     * Blocks for whatever is left of the buffer-drain window, which is normally nothing.
+     *
+     * Leaving the game screen stops the thread at composition-dispose time, several frames
+     * before the framework destroys the surface, so by the time it matters the window has
+     * already passed and this returns immediately instead of dropping frames on the way out.
+     */
+    private fun awaitBufferDrain() {
+        val remainingMs = (drainDeadlineNs - System.nanoTime()) / 1_000_000L
+        drainDeadlineNs = 0L
+        if (remainingMs > 0L) android.os.SystemClock.sleep(remainingMs)
     }
 
     @SuppressLint("ClickableViewAccessibility")
     override fun onTouchEvent(event: MotionEvent): Boolean {
-        if (event.actionMasked != MotionEvent.ACTION_DOWN) return true
-        val x = event.x
-        val y = event.y
+        // ACTION_POINTER_DOWN counts as well as ACTION_DOWN. Four fruit are up at once by the
+        // seventh gear, so a second thumb landing while the first is still down is how the
+        // game is meant to be played — taking only ACTION_DOWN dropped every one of those
+        // taps on the floor and let the fruit expire into a strike.
+        val action = event.actionMasked
+        if (action != MotionEvent.ACTION_DOWN && action != MotionEvent.ACTION_POINTER_DOWN) {
+            return true
+        }
+        // ...and the coordinates have to come from the pointer that went down, not from
+        // whichever one happens to be at index 0.
+        val pointer = event.actionIndex
+        val x = event.getX(pointer)
+        val y = event.getY(pointer)
 
         if (renderer.endRunRect.contains(x, y)) {
             quitRun()
@@ -149,13 +190,14 @@ class GameSurfaceView @JvmOverloads constructor(
 
     override fun surfaceCreated(holder: SurfaceHolder) {
         readRootInsets()
+        // A surface can be destroyed and rebuilt without the run ever ending — backgrounding
+        // the app does exactly that — so the clock resumes from where it was suspended
+        // instead of counting the absence as survived time.
+        engine.resume(System.nanoTime())
+        renderer.resetFrameClock()
         val t = RenderThread(holder)
         thread = t
         t.start()
-        pendingStart?.let {
-            engine.start(it, System.nanoTime())
-            pendingStart = null
-        }
     }
 
     override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
@@ -168,6 +210,9 @@ class GameSurfaceView @JvmOverloads constructor(
 
     override fun surfaceDestroyed(holder: SurfaceHolder) {
         stopRendering()
+        // The framework tears the buffer queue down as soon as this returns, so this is the
+        // one place the drain window actually has to have elapsed.
+        awaitBufferDrain()
     }
 
     private fun readRootInsets() {
@@ -235,6 +280,14 @@ class GameSurfaceView @JvmOverloads constructor(
                     continue
                 }
 
+                // Queued by startRun on the UI thread; applied here so the engine's state is
+                // only ever rewritten by the thread that reads it.
+                pendingStart?.let { ranked ->
+                    pendingStart = null
+                    renderer.reset()
+                    engine.start(ranked, System.nanoTime())
+                }
+
                 if (layoutDirty || pendingWidth != appliedWidth || pendingHeight != appliedHeight) {
                     appliedWidth = pendingWidth
                     appliedHeight = pendingHeight
@@ -277,14 +330,11 @@ class GameSurfaceView @JvmOverloads constructor(
 
         /**
          * Prefers the GPU-backed canvas. The software path is only a defensive fallback for
-         * devices that refuse a hardware surface.
+         * devices that refuse a hardware surface. (minSdk is 26, which is where
+         * lockHardwareCanvas arrived, so no version check is needed.)
          */
         private fun lockCanvas(): Canvas? = try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                surfaceHolder.lockHardwareCanvas() ?: surfaceHolder.lockCanvas()
-            } else {
-                surfaceHolder.lockCanvas()
-            }
+            surfaceHolder.lockHardwareCanvas() ?: surfaceHolder.lockCanvas()
         } catch (_: IllegalStateException) {
             null
         }

@@ -1,5 +1,11 @@
 package tech.idct.whaaack.ui
 
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -14,9 +20,12 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBarsPadding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -33,6 +42,7 @@ import tech.idct.whaaack.data.LeaderboardRepository
 import tech.idct.whaaack.game.Fruit
 import tech.idct.whaaack.game.GameAssets
 import tech.idct.whaaack.ui.theme.AccentInk
+import tech.idct.whaaack.ui.theme.AccentLight
 import tech.idct.whaaack.ui.theme.Cream
 import tech.idct.whaaack.ui.theme.Hairline
 
@@ -141,7 +151,11 @@ fun HomeScreen(
             Spacer(Modifier.height(12.dp))
         }
 
-        if (state.signedIn) {
+        // Which pair of buttons is correct depends on the session, so until that is known
+        // the honest thing to show is neither.
+        if (!state.sessionResolved) {
+            SessionLoader()
+        } else if (state.signedIn) {
             PrimaryButton("Play ranked", onClick = onPlayRanked)
             Spacer(Modifier.height(14.dp))
             SecondaryButton("Play for fun", onClick = onPlayCasual)
@@ -154,22 +168,72 @@ fun HomeScreen(
         Spacer(Modifier.height(14.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             HomeChipButton("🏆  Leaderboard", Modifier.weight(1f), onLeaderboard)
-            if (!state.signedIn) {
+            if (state.sessionResolved && !state.signedIn) {
                 HomeChipButton("Create account", Modifier.weight(1f), onCreateAccount)
             }
         }
     }
 }
 
+/**
+ * Stands in for the two play buttons while the session is being read, at exactly their
+ * combined height (62 + 8 lift, a 14 gap, then 54) so the real ones drop into place rather
+ * than shoving the screen around.
+ */
+@Composable
+private fun SessionLoader() {
+    val transition = rememberInfiniteTransition(label = "session")
+    Box(Modifier.fillMaxWidth().height(138.dp), contentAlignment = Alignment.Center) {
+        Row(
+            // The same dark pill the tagline uses: cream on its own washes out against the
+            // orchard, and this sits over the busiest part of it.
+            Modifier
+                .clip(RoundedCornerShape(999.dp))
+                .background(Color(0x99091428))
+                .border(1.dp, Color(0x29FFF3E6), RoundedCornerShape(999.dp))
+                .padding(horizontal = 20.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            repeat(3) { index ->
+                val alpha by transition.animateFloat(
+                    initialValue = 0.2f,
+                    targetValue = 1f,
+                    animationSpec = infiniteRepeatable(
+                        // Staggered starts turn three pulsing dots into one travelling wave.
+                        animation = tween(520, delayMillis = index * 150, easing = LinearEasing),
+                        repeatMode = RepeatMode.Reverse,
+                    ),
+                    label = "dot$index",
+                )
+                Box(
+                    Modifier
+                        .size(9.dp)
+                        .clip(RoundedCornerShape(999.dp))
+                        .background(AccentLight.copy(alpha = alpha)),
+                )
+            }
+            Spacer(Modifier.width(4.dp))
+            Text(
+                "Checking your account…",
+                color = Cream,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold,
+            )
+        }
+    }
+}
+
 @Composable
 private fun FruitChip(assets: GameAssets?, fruit: Fruit) {
-    val bitmap = assets?.fruits?.get(fruit)
-    if (bitmap == null) {
+    // asImageBitmap allocates a wrapper each call, so it is cached like the backdrop's.
+    val image = remember(assets, fruit) { assets?.fruits?.get(fruit)?.asImageBitmap() }
+    if (image == null) {
         Box(Modifier.size(28.dp))
         return
     }
     Image(
-        bitmap = bitmap.asImageBitmap(),
+        bitmap = image,
         contentDescription = null,
         modifier = Modifier.size(28.dp),
         contentScale = ContentScale.Fit,

@@ -4,9 +4,12 @@
 # Secrets are read from the environment via env(...) so nothing sensitive is committed.
 # Required environment variables:
 #   RESEND_API_KEY        Resend SMTP password (the API key itself)
-#   GOOGLE_CLIENT_ID      OAuth *web* client id from Google Cloud
-#   GOOGLE_CLIENT_SECRET  matching client secret
-#   GOOGLE_ANDROID_CLIENT_ID  OAuth *Android* client id (native Credential Manager flow)
+#   GOOGLE_CLIENT_ID      web client id, then the Android one, comma-separated
+#   GOOGLE_CLIENT_SECRET  secret of the *web* client
+#
+# Every env(...) here must be set on every push. An unset variable is left as the
+# literal string "env(NAME)" and pushed verbatim, which would overwrite the remote
+# secret with garbage.
 
 project_id = "pklrfcbyseitdbxkmsnw"
 
@@ -53,13 +56,22 @@ sign_in_sign_ups = 30
 token_refresh = 150
 anonymous_users = 10
 
-# Google sign-in. Left disabled until the Google Cloud OAuth clients exist — see
-# docs/SETUP.md. Once GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET are exported, flip
-# `enabled` to true and run `supabase config push` again.
+# Google sign-in. Both OAuth clients exist in Google Cloud project whaaack-505409; this is
+# live once GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET are exported and pushed. See
+# docs/SETUP.md section 3.
 [auth.external.google]
-enabled = false
+enabled = true
+# Credential Manager returns an ID token minted for the Android client, so Supabase has to
+# accept that audience alongside the web client it verifies against. There is no separate
+# field for it: the remote splits this value on commas into client_id plus the dashboard's
+# "Authorized Client IDs". GOOGLE_CLIENT_ID therefore holds both, web first:
+#
+#   964578061899-aaiu8iv8u6fngd93to4vkma91abip7k8.apps.googleusercontent.com,964578061899-o3srji4j87lltkc3bphbsv6o6hj4t9b1.apps.googleusercontent.com
+#
+# The two cannot live in separate variables: the CLI matches env(...) anchored end to end,
+# so "env(A),env(B)" is never substituted — it is pushed as that literal text.
 client_id = "env(GOOGLE_CLIENT_ID)"
 secret = "env(GOOGLE_CLIENT_SECRET)"
-# Credential Manager returns an ID token minted for the Android client; Supabase must
-# accept it in addition to the web client that signs it.
+# The app hashes a nonce into the Google request and sends the raw value to Supabase
+# alongside the token, so leave verification on.
 skip_nonce_check = false

@@ -41,6 +41,33 @@ Sprites are decoded once, off the main thread. Splat silhouettes are kept as `AL
 masks — a quarter of the memory of ARGB, and drawing them takes colour from the `Paint`,
 which is exactly the per-fruit gradient tint the design calls for.
 
+## The icon
+
+Every icon the app ships is generated from one master, `assets/icon/icon-2.png`:
+
+```bash
+python tools/generate_launcher_icons.py --preview
+```
+
+Each surface gets its own framing rather than one bitmap reused everywhere, because the
+surfaces disagree about what they will do to it:
+
+- **Adaptive foreground** — the artwork's *minimum enclosing circle* is pinned to 71dp on
+  the 108dp canvas. Launcher masks are inscribed in the middle 72dp, so a circle that size
+  cannot be clipped by a circle, squircle, teardrop or rounded-square mask. (The previous
+  icon was sized to its bounding box, which is why its corners were cut off.)
+- **Monochrome** — its own bitmap, not the foreground. Android 13+ themed icons keep only
+  the alpha channel, so colour artwork renders as one featureless blob; this layer knocks
+  the flesh out as negative space and adds a gap ring, so the slice still reads.
+- **Legacy 48dp** — nothing masks these, so the background is baked in and the artwork is
+  inset to leave its own margin.
+- **In-app logo** (`R.drawable.logo_whaaack`, the About screen) — no mask and no
+  background, so the *bounding box* is fitted instead and the art fills the space.
+- **`assets/icon/play-store-512.png`** — Google re-masks it, so content stays inside 80%.
+
+`--preview` writes `tools/icon-preview.png`: every mask shape at every launcher size, plus
+the themed icon in light and dark. Worth a look before shipping an icon change.
+
 ## Layout
 
 ```
@@ -49,10 +76,11 @@ app/src/main/java/tech/idct/whaaack/
   ui/       Compose screens + shared components
   data/     Supabase client, auth, leaderboard, settings
   audio/    SoundPool effects + MediaPlayer music
-  ads/      AdMob rewarded interstitial, UMP consent
+  ads/      AdMob interstitial, UMP consent
 supabase/
   migrations/   schema, RLS, leaderboard functions
   config.toml   remote auth settings
+tools/          launcher-icon generator (Pillow + numpy)
 docs/SETUP.md   credentials, Google OAuth, AdMob consent, release checklist
 ```
 

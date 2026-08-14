@@ -7,9 +7,8 @@ import android.os.VibratorManager
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.getValue
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
@@ -32,30 +31,35 @@ fun GameScreen(
     onStrike: () -> Unit,
     onGameOver: (GameEngine.Result) -> Unit,
     onLose: () -> Unit,
-    onQuit: () -> Unit,
 ) {
     val context = LocalContext.current
-    val currentOnHit by rememberUpdatedState(onHit)
-    val currentOnStrike by rememberUpdatedState(onStrike)
-    val currentOnGameOver by rememberUpdatedState(onGameOver)
-    val currentOnLose by rememberUpdatedState(onLose)
-    val currentOnQuit by rememberUpdatedState(onQuit)
-    val haptics by rememberUpdatedState(hapticsEnabled)
+
+    // Plain volatile fields rather than rememberUpdatedState: onHit is delivered on the
+    // render thread, and reading a Compose snapshot state off the main thread is not
+    // something the snapshot system promises anything about.
+    val live = remember { LiveCallbacks() }
+    SideEffect {
+        live.onHit = onHit
+        live.onStrike = onStrike
+        live.onGameOver = onGameOver
+        live.onLose = onLose
+        live.haptics = hapticsEnabled
+    }
 
     val vibrator = remember {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            val manager = context.getSystemService(VibratorManager::class.java)
-            manager?.defaultVibrator
+        val service = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            context.getSystemService(VibratorManager::class.java)?.defaultVibrator
         } else {
             @Suppress("DEPRECATION")
             context.getSystemService(Vibrator::class.java)
         }
+        // hasVibrator() is a binder call; ask once rather than on every whack.
+        service?.takeIf { it.hasVibrator() }
     }
 
     fun buzz(ms: Long, amplitude: Int) {
-        if (!haptics) return
+        if (!live.haptics) return
         val v = vibrator ?: return
-        if (!v.hasVibrator()) return
         runCatching { v.vibrate(VibrationEffect.createOneShot(ms, amplitude)) }
     }
 
@@ -69,20 +73,24 @@ fun GameScreen(
             GameSurfaceView(ctx).also { viewRef[0] = it }.apply {
                 attachAssets(assets)
                 callbacks = object : GameSurfaceView.Callbacks {
+                    // Main thread.
                     override fun onGameOver(result: GameEngine.Result) {
-                        currentOnLose()
-                        currentOnGameOver(result)
+                        // A run the player ended themselves is not a defeat, so it does not
+                        // get the defeat sting.
+                        if (!result.quit) live.onLose()
+                        live.onGameOver(result)
                     }
 
-                    override fun onQuit() = currentOnQuit()
-
+                    // Render thread: SoundPool.play only, so the splat lands on the frame
+                    // that simulated it.
                     override fun onHit(fruit: Fruit) {
-                        currentOnHit(fruit)
-                        buzz(18, VibrationEffect.DEFAULT_AMPLITUDE)
+                        live.onHit(fruit)
+                        post { buzz(18, VibrationEffect.DEFAULT_AMPLITUDE) }
                     }
 
+                    // Main thread.
                     override fun onStrike(strikes: Int) {
-                        currentOnStrike()
+                        live.onStrike()
                         buzz(60, VibrationEffect.DEFAULT_AMPLITUDE)
                     }
                 }
@@ -97,4 +105,22 @@ fun GameScreen(
             viewRef[0] = null
         }
     }
+}
+
+/** Mutable relay between recomposition (main thread) and the render thread. */
+private class LiveCallbacks {
+    @Volatile
+    var onHit: (Fruit) -> Unit = {}
+
+    @Volatile
+    var onStrike: () -> Unit = {}
+
+    @Volatile
+    var onGameOver: (GameEngine.Result) -> Unit = {}
+
+    @Volatile
+    var onLose: () -> Unit = {}
+
+    @Volatile
+    var haptics: Boolean = true
 }

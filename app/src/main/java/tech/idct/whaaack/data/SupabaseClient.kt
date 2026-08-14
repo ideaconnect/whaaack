@@ -143,9 +143,22 @@ class SupabaseClient(
         return session
     }
 
+    /**
+     * A single authorized GET against a token that is not (yet) the stored session.
+     *
+     * The auth deep link needs this: it arrives holding tokens but no idea whose account
+     * they belong to, and a [Session] with an empty user id is worse than none — every
+     * later profile call becomes `?id=eq.`, which PostgREST answers with a 400 rather than
+     * the 401 that would sign the player out again.
+     */
+    suspend fun getAs(path: String, accessToken: String): String =
+        execute(builder(path, authorized = true, token = accessToken).get().build())
+
     suspend fun currentSession(): Session? = sessions.current()
 
     suspend fun saveSession(session: Session) = sessions.save(session)
+
+    suspend fun cacheDisplayName(name: String) = sessions.saveDisplayName(name)
 
     suspend fun clearSession() = sessions.clear()
 }

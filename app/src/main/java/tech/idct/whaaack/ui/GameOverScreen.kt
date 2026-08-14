@@ -34,6 +34,7 @@ import tech.idct.whaaack.ui.theme.Hairline
 @Composable
 fun GameOverScreen(
     run: RunSummary,
+    signedIn: Boolean,
     adsAvailable: Boolean,
     onPlayAgain: () -> Unit,
     onHome: () -> Unit,
@@ -50,7 +51,9 @@ fun GameOverScreen(
             verticalArrangement = Arrangement.Center,
         ) {
             Text(
-                "Three escaped.",
+                // Ending the run yourself is not losing it, and used to be reported as if
+                // three fruit had escaped.
+                if (run.quit) "Run ended." else "Three escaped.",
                 color = Cream,
                 fontSize = 40.sp,
                 fontWeight = FontWeight.Black,
@@ -140,20 +143,28 @@ fun GameOverScreen(
                 }
             } else if (!run.ranked) {
                 Spacer(Modifier.height(16.dp))
+                // Both cases explain the missing rank, but only someone without an account
+                // should be invited to make one — a signed-in player who chose a casual run
+                // was being told to sign in on top of the account they already have.
+                val invite = !signedIn
                 Row(
                     Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(24.dp))
                         .background(Color(0x57140A1A))
                         .border(1.dp, Color(0x47FFF3E6), RoundedCornerShape(24.dp))
-                        .clickableOnce(true, onSignIn)
+                        .then(if (invite) Modifier.clickableOnce(true, onSignIn) else Modifier)
                         .padding(horizontal = 18.dp, vertical = 16.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
                     Text("🏆", fontSize = 20.sp)
                     Text(
-                        "Casual run — not ranked. Sign in to put your scores on the board.",
+                        if (invite) {
+                            "Casual run — not ranked. Sign in to put your scores on the board."
+                        } else {
+                            "Casual run — not ranked. Play ranked to put a score on the board."
+                        },
                         color = Color(0xCCFFF3E6),
                         fontSize = 13.sp,
                         lineHeight = 18.sp,
@@ -168,7 +179,10 @@ fun GameOverScreen(
         if (adsAvailable) {
             Spacer(Modifier.height(8.dp))
             Text(
-                "AD PLAYS BEFORE NEXT SCREEN",
+                // "May", not "will": ads are capped to one every couple of minutes, and are
+                // skipped outright when nothing has filled. Promising one that then does not
+                // arrive is a worse look than not promising it.
+                "AD MAY PLAY BEFORE NEXT SCREEN",
                 color = Color(0x59FFF3E6),
                 fontSize = 10.sp,
                 fontWeight = FontWeight.SemiBold,

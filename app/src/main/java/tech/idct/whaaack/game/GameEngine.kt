@@ -1,7 +1,9 @@
 package tech.idct.whaaack.game
 
 import java.util.concurrent.ConcurrentLinkedQueue
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.math.max
+import kotlin.math.min
 import kotlin.random.Random
 
 /**
@@ -9,8 +11,8 @@ import kotlin.random.Random
  * stepped from the render thread without contending with the main thread.
  *
  * Rules, per the brief:
- *  - exactly two fruit slots, each cycling independently so they can surface together or
- *    slightly offset, but never more than two at once;
+ *  - two fruit slots, each cycling independently so they can surface together or slightly
+ *    offset; a third and then a fourth open as the run climbs, on the same terms;
  *  - a fruit that is not whacked before its life expires costs a strike;
  *  - three strikes end the run;
  *  - the score is the number of milliseconds survived;
@@ -47,6 +49,8 @@ class GameEngine(private val random: Random = Random.Default) {
         val hits: Int,
         val topSpeedLevel: Int,
         val ranked: Boolean,
+        /** True when the player ended the run themselves rather than losing it. */
+        val quit: Boolean,
     )
 
     var listener: Listener? = null
@@ -88,6 +92,7 @@ class GameEngine(private val random: Random = Random.Default) {
     var outroStartedNs: Long = 0L
         private set
 
+    @Volatile
     var countdownValue: Int = 0
         private set
 
@@ -95,7 +100,20 @@ class GameEngine(private val random: Random = Random.Default) {
     private var countdownEndsNs = 0L
     private val nextSpawnNs = LongArray(MAX_TARGETS)
     private val pendingTaps = ConcurrentLinkedQueue<Int>()
+    private val quitRequested = AtomicBoolean(false)
     private var result: Result? = null
+
+    /** Nanotime the clock was suspended at, or 0 when the run is live. */
+    private var pausedAtNs = 0L
+
+    /**
+     * True while [Phase.COUNTDOWN] is handing an interrupted run back rather than opening a
+     * new one, so the countdown ends by resuming instead of by starting from zero.
+     */
+    private var resumingRun = false
+
+    /** Slots cycling right now; grows as the run passes each new target's level. */
+    private var openTargets = BASE_TARGETS
 
     fun start(ranked: Boolean, nowNs: Long) {
         this.ranked = ranked
@@ -112,26 +130,111 @@ class GameEngine(private val random: Random = Random.Default) {
         slots.fill(null)
         splats.clear()
         pendingTaps.clear()
+        quitRequested.set(false)
+        pausedAtNs = 0L
+        resumingRun = false
+        openTargets = BASE_TARGETS
     }
 
-    /** Called from the UI thread when the player taps tile [tile]. */
+    /**
+     * Called from the UI thread when the player taps tile [tile].
+     *
+     * Only a live run accepts one. [drainTaps] runs from [stepRun] and nowhere else, so a tap
+     * made in any other phase has no frame that would ever consume it: those made during a
+     * countdown were banked and applied in one burst on the first live frame, and those made
+     * during the outro or after the run ended simply accumulated in the queue.
+     */
     fun postTap(tile: Int) {
+        if (phase != Phase.RUNNING) return
         if (tile in 0 until TILE_COUNT) pendingTaps.add(tile)
     }
 
-    /** Ends the run early without it counting as a loss (the "End run" button). */
-    fun quit(nowNs: Long) {
-        if (phase == Phase.RUNNING || phase == Phase.COUNTDOWN) finish(nowNs, quit = true)
+    /**
+     * Asks for the run to end early without it counting as a loss (the "End run" button).
+     *
+     * Only a flag is set here: the run is torn down on the render thread inside [update],
+     * because a caller on the UI thread cannot safely rewrite `slots` and `phase` while a
+     * frame is being simulated.
+     */
+    fun requestQuit() {
+        quitRequested.set(true)
     }
 
-    fun consumeResult(): Result? = result
+    /**
+     * Suspends the clock. Every deadline the run holds is expressed as an absolute nanotime,
+     * so without this the wall clock keeps running while the app is backgrounded: the player
+     * would come back to a score inflated by however long they were away and to fruit that
+     * expired in their absence.
+     *
+     * Call only while the render thread is stopped — [pause] and [resume] deliberately do no
+     * locking because [GameSurfaceView] brackets them around the thread's lifetime.
+     */
+    fun pause(nowNs: Long) {
+        if (pausedAtNs != 0L) return
+        if (phase != Phase.COUNTDOWN && phase != Phase.RUNNING && phase != Phase.OUTRO) return
+        pausedAtNs = nowNs
+    }
+
+    /**
+     * Resumes the clock, shifting every deadline forward by the time spent paused.
+     *
+     * A run that was live when it was suspended does not simply carry on: whatever was on the
+     * board when the player left is by then most of the way through its life, so handing
+     * control straight back means the first thing they get on return is a strike they had no
+     * chance to prevent. Instead the run re-enters [Phase.COUNTDOWN] for [RESUME_COUNTDOWN_MS]
+     * and that countdown is folded into the shift, so the clock, the fruit and the spawn
+     * schedule all come back exactly where they were left.
+     */
+    fun resume(nowNs: Long) {
+        val pausedAt = pausedAtNs
+        if (pausedAt == 0L) return
+        pausedAtNs = 0L
+        val interrupted = phase == Phase.RUNNING
+        var gap = (nowNs - pausedAt).coerceAtLeast(0L)
+        if (interrupted) gap += RESUME_COUNTDOWN_MS * NS_PER_MS
+        if (gap <= 0L) return
+
+        startNs += gap
+        countdownEndsNs += gap
+        for (i in nextSpawnNs.indices) nextSpawnNs[i] += gap
+        for (active in slots) active?.let { it.bornNs += gap }
+        for (splat in splats) splat.bornNs += gap
+        // Zero means "never happened", so those two must not be shifted into meaning something.
+        if (lastStrikeNs != 0L) lastStrikeNs += gap
+        if (outroStartedNs != 0L) outroStartedNs += gap
+
+        if (interrupted) {
+            phase = Phase.COUNTDOWN
+            resumingRun = true
+            countdownEndsNs = nowNs + RESUME_COUNTDOWN_MS * NS_PER_MS
+            countdownValue = RESUME_COUNTDOWN_MS / 1000
+        }
+    }
 
     fun update(nowNs: Long) {
+        if (pausedAtNs != 0L) return
+        if (quitRequested.getAndSet(false) &&
+            (phase == Phase.RUNNING || phase == Phase.COUNTDOWN)
+        ) {
+            finish(nowNs, quit = true)
+            return
+        }
         when (phase) {
             Phase.COUNTDOWN -> {
                 val remainingMs = (countdownEndsNs - nowNs) / NS_PER_MS
                 countdownValue = ((remainingMs + 999) / 1000).toInt().coerceAtLeast(0)
-                if (nowNs >= countdownEndsNs) beginRun(nowNs)
+                if (nowNs >= countdownEndsNs) {
+                    // Belt and braces against a tap that raced the phase flip: anything the
+                    // player pressed while the board was frozen belongs to the countdown, not
+                    // to the frame the run comes back on.
+                    pendingTaps.clear()
+                    if (resumingRun) {
+                        resumingRun = false
+                        phase = Phase.RUNNING
+                    } else {
+                        beginRun(nowNs)
+                    }
+                }
             }
 
             Phase.RUNNING -> stepRun(nowNs)
@@ -169,7 +272,16 @@ class GameEngine(private val random: Random = Random.Default) {
         val lifeMs = fruitLifeMs(level)
         var struck = false
 
-        for (i in 0 until MAX_TARGETS) {
+        while (openTargets < targetsAtLevel(level)) {
+            // A newly opened slot gets the same delayed, jittered entry every other slot gets
+            // once it is cleared, so it reads as one more independent arrival rather than the
+            // set suddenly blinking in unison. Left unscheduled until now because a zeroed
+            // deadline is already in the past: the slot would fire the instant it opened.
+            scheduleRespawn(openTargets, nowNs)
+            openTargets++
+        }
+
+        for (i in 0 until openTargets) {
             val active = slots[i]
             if (active != null) {
                 if ((nowNs - active.bornNs) / NS_PER_MS >= active.lifeMs) {
@@ -215,15 +327,45 @@ class GameEngine(private val random: Random = Random.Default) {
         }
     }
 
-    private fun spawn(slot: Int, nowNs: Long, lifeMs: Int) {
-        val taken = HashSet<Int>(4)
-        for (other in slots) other?.let { taken.add(it.tile) }
-        // Avoid dropping a fruit onto a tile that is still showing a splat.
-        for (s in splats) taken.add(s.tile)
+    /** True when a fruit already occupies [tile]. */
+    private fun tileHasFruit(tile: Int): Boolean {
+        for (other in slots) if (other != null && other.tile == tile) return true
+        return false
+    }
 
+    /** True when a fruit already occupies [tile], or a splat is still fading on it. */
+    private fun tileBusy(tile: Int): Boolean {
+        if (tileHasFruit(tile)) return true
+        for (i in splats.indices) if (splats[i].tile == tile) return true
+        return false
+    }
+
+    /**
+     * First tile after [from] that is free, preferring one with no splat on it but settling
+     * for a splat-covered tile over a fruit-covered one.
+     */
+    private fun firstFreeTile(from: Int): Int? {
+        var splatOnly = -1
+        for (offset in 1..TILE_COUNT) {
+            val candidate = (from + offset) % TILE_COUNT
+            if (tileHasFruit(candidate)) continue
+            if (!tileBusy(candidate)) return candidate
+            if (splatOnly < 0) splatOnly = candidate
+        }
+        return if (splatOnly >= 0) splatOnly else null
+    }
+
+    private fun spawn(slot: Int, nowNs: Long, lifeMs: Int) {
+        // Scanned rather than collected into a set: there are only a few slots and a
+        // handful of splats, and this runs several times a second at top speed.
         var tile = random.nextInt(TILE_COUNT)
         var guard = 0
-        while (tile in taken && guard++ < TILE_COUNT * 2) tile = random.nextInt(TILE_COUNT)
+        while (tileBusy(tile) && guard++ < TILE_COUNT * 2) tile = random.nextInt(TILE_COUNT)
+        // Three fruit and their splats cover far more of the board than two did, so the
+        // random probe runs dry often enough to matter. A splat underneath is only cosmetic;
+        // a second fruit on the same tile is not, because one tap clears only one of them
+        // and the other is left to expire into a strike the player could not have prevented.
+        if (tileBusy(tile)) tile = firstFreeTile(tile) ?: tile
 
         slots[slot] = ActiveFruit(
             tile = tile,
@@ -235,26 +377,35 @@ class GameEngine(private val random: Random = Random.Default) {
 
     private fun scheduleRespawn(slot: Int, nowNs: Long) {
         val interval = spawnIntervalMs(level)
-        // A little jitter keeps the two slots from locking into phase with each other.
+        // A little jitter keeps the slots from locking into phase with each other.
         val jitter = (random.nextFloat() * interval * SPAWN_JITTER).toLong()
         nextSpawnNs[slot] = nowNs + (interval * SPAWN_GAP).toLong() * NS_PER_MS + jitter * NS_PER_MS
     }
 
     private fun expireSplats(nowNs: Long) {
-        if (splats.isEmpty()) return
-        val it = splats.iterator()
-        while (it.hasNext()) {
-            if ((nowNs - it.next().bornNs) / NS_PER_MS >= SPLAT_LIFE_MS) it.remove()
+        // Backwards by index so removal cannot disturb the positions still to be examined.
+        // `downTo` rather than `indices.reversed()`: the former is guaranteed to compile to
+        // a plain counter, and not allocating per frame is the entire point here.
+        for (i in splats.size - 1 downTo 0) {
+            if ((nowNs - splats[i].bornNs) / NS_PER_MS >= SPLAT_LIFE_MS) splats.removeAt(i)
         }
     }
 
     private fun finish(nowNs: Long, quit: Boolean) {
-        elapsedMs = if (phase == Phase.RUNNING) (nowNs - startNs) / NS_PER_MS else 0L
+        elapsedMs = when {
+            phase == Phase.RUNNING -> (nowNs - startNs) / NS_PER_MS
+            // A run paused mid-flight sits in COUNTDOWN too, and it has a score: only one
+            // abandoned during the *opening* countdown was never played at all.
+            resumingRun -> elapsedMs
+            else -> 0L
+        }
+        resumingRun = false
         result = Result(
             millisSurvived = elapsedMs,
             hits = hits,
             topSpeedLevel = level,
             ranked = ranked,
+            quit = quit,
         )
         slots.fill(null)
         if (quit) {
@@ -271,9 +422,35 @@ class GameEngine(private val random: Random = Random.Default) {
         const val TILE_COLUMNS = 4
         const val TILE_ROWS = 4
         const val TILE_COUNT = TILE_COLUMNS * TILE_ROWS
-        const val MAX_TARGETS = 2
+        /** Slots available at the hardest point in a run. */
+        const val MAX_TARGETS = 4
+
+        /** Slots a run opens with. */
+        const val BASE_TARGETS = 2
+
+        // Levels at which each further slot opens. The HUD reads `level + 1`, so these are
+        // the points where the speed readout ticks to 6 and to 7: two fruit through the
+        // fifth gear, three in the sixth, four from the seventh on.
+        const val THIRD_TARGET_LEVEL = 5
+        const val FOURTH_TARGET_LEVEL = 6
+
+        /** How many slots cycle at [level]. */
+        fun targetsAtLevel(level: Int): Int = when {
+            level >= FOURTH_TARGET_LEVEL -> 4
+            level >= THIRD_TARGET_LEVEL -> 3
+            else -> BASE_TARGETS
+        }
+
         const val MAX_STRIKES = 3
         const val COUNTDOWN_MS = 3_000
+
+        /**
+         * Countdown replayed when an interrupted run comes back. Shorter than the opening
+         * one — the player already knows what they are looking at — but long enough to read
+         * the board before it starts moving again.
+         */
+        const val RESUME_COUNTDOWN_MS = 2_000
+
         const val OUTRO_MS = 1_500
         const val SPLAT_LIFE_MS = 1_100
         const val STRIKE_FLASH_MS = 420
@@ -305,11 +482,35 @@ class GameEngine(private val random: Random = Random.Default) {
         fun fruitLifeMs(level: Int): Int =
             max(MIN_LIFE_MS, START_LIFE_MS - level * LIFE_STEP_MS)
 
+        /**
+         * The level at which both tracks have reached their floor and nothing gets harder.
+         * Derived rather than written down so it cannot drift out of step with the curve.
+         * Everything the player *reads* as speed — the bar, the number, the parallax — is
+         * clamped to this, because past it the run genuinely is not speeding up any more.
+         */
+        val TOP_SPEED_LEVEL: Int = run {
+            var candidate = 0
+            // Bounded: a curve retuned so that neither track ever reaches its floor would
+            // otherwise hang class initialisation here rather than fail somewhere visible.
+            while (
+                candidate < 1_000 &&
+                (spawnIntervalMs(candidate) > MIN_INTERVAL_MS ||
+                    fruitLifeMs(candidate) > MIN_LIFE_MS)
+            ) {
+                candidate++
+            }
+            candidate
+        }
+
+        /** 1-based speed for the HUD, held at [TOP_SPEED_LEVEL] once the curve flattens. */
+        fun displaySpeed(level: Int): Int = min(level, TOP_SPEED_LEVEL) + 1
+
+        fun isTopSpeed(level: Int): Boolean = level >= TOP_SPEED_LEVEL
+
         /** 0..1 progress toward top speed, for the HUD's speed bar. */
         fun speedFraction(level: Int): Float {
-            val span = (START_INTERVAL_MS - MIN_INTERVAL_MS).toFloat()
-            val current = spawnIntervalMs(level).toFloat()
-            return ((START_INTERVAL_MS - current) / span).coerceIn(0f, 1f)
+            if (TOP_SPEED_LEVEL <= 0) return 1f
+            return (min(level, TOP_SPEED_LEVEL).toFloat() / TOP_SPEED_LEVEL).coerceIn(0f, 1f)
         }
     }
 }

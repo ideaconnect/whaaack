@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Cloud backup on Android 11 and below.
+
+    Naming any <include> makes the set exhaustive, which is the point: the only thing worth
+    carrying to a new device is the player's settings and their offline best. The session
+    store is deliberately absent — it holds a Supabase access *and* refresh token, and a
+    refresh token restored onto a different device is a working key to the account.
+-->
+<full-backup-content>
+    <include domain="file" path="datastore/whaaack_settings.preferences_pb" />
+</full-backup-content>
