@@ -483,3 +483,49 @@ fun Modifier.clickableOnce(enabled: Boolean, onClick: () -> Unit): Modifier {
 
 /** Long enough to swallow a fumbled double tap, short enough not to feel unresponsive. */
 private const val CLICK_DEBOUNCE_MS = 500L
+
+/**
+ * The gold crown badge that marks the paid unlock, carried over from Chromis so the two
+ * apps flag a purchase the same way: a flat gold crown on a 16%-gold fill inside a
+ * 55%-gold border. Deliberately not the game's own amber accent — this has to read as a
+ * badge, not as another button.
+ */
+@Composable
+fun RemoveAdsButton(
+    price: String,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+) {
+    val shape = RoundedCornerShape(18.dp)
+    Row(
+        modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .background(CrownGold.copy(alpha = 0.16f))
+            .border(1.dp, CrownGold.copy(alpha = 0.55f), shape)
+            .clickableOnce(true, onClick)
+            .padding(horizontal = 16.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Box(
+            Modifier
+                .size(38.dp)
+                .clip(RoundedCornerShape(14.dp))
+                .background(CrownGold.copy(alpha = 0.16f))
+                .border(1.dp, CrownGold.copy(alpha = 0.55f), RoundedCornerShape(14.dp)),
+            contentAlignment = Alignment.Center,
+        ) {
+            CrownIcon(color = CrownGold, size = 21.dp)
+        }
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text("Remove ads", color = Cream, fontSize = 14.sp, fontWeight = FontWeight.Black)
+            Text(
+                "One-time purchase, no subscription",
+                color = Color(0x9EFFF3E6),
+                fontSize = 11.sp,
+            )
+        }
+        Text(price, color = CrownGold, fontSize = 14.sp, fontWeight = FontWeight.Black)
+    }
+}

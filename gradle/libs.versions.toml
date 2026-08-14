@@ -16,6 +16,7 @@ playServicesAds = "25.4.0"
 userMessagingPlatform = "4.0.0"
 credentials = "1.3.0"
 googleid = "1.1.1"
+billing = "9.1.0"
 junit = "4.13.2"
 
 [libraries]
@@ -44,6 +45,8 @@ user-messaging-platform = { group = "com.google.android.ump", name = "user-messa
 androidx-credentials = { group = "androidx.credentials", name = "credentials", version.ref = "credentials" }
 androidx-credentials-play-services-auth = { group = "androidx.credentials", name = "credentials-play-services-auth", version.ref = "credentials" }
 googleid = { group = "com.google.android.libraries.identity.googleid", name = "googleid", version.ref = "googleid" }
+
+billing-ktx = { group = "com.android.billingclient", name = "billing-ktx", version.ref = "billing" }
 
 junit = { group = "junit", name = "junit", version.ref = "junit" }
 

@@ -51,6 +51,8 @@ fun SettingsScreen(
     onToggleHaptics: (Boolean) -> Unit,
     onToggleParallax: (Boolean) -> Unit,
     onPrivacyOptions: () -> Unit,
+    onRemoveAds: () -> Unit,
+    onRestorePurchases: () -> Unit,
     onChangeName: (String) -> Unit,
     onChangeEmail: (String) -> Unit,
     onChangePassword: (String) -> Unit,
@@ -85,6 +87,48 @@ fun SettingsScreen(
                 ToggleRow(
                     "Parallax background", "Turn off to reduce motion",
                     state.prefs.parallax, onToggleParallax,
+                )
+
+                Spacer(Modifier.height(10.dp))
+                SectionLabel("Ads")
+                when {
+                    // Already paid: say so, and never show a price again.
+                    state.adsRemoved == true -> Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(18.dp))
+                            .background(CrownGold.copy(alpha = 0.16f))
+                            .border(1.dp, CrownGold.copy(alpha = 0.55f), RoundedCornerShape(18.dp))
+                            .padding(horizontal = 16.dp, vertical = 14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        CrownIcon(color = CrownGold, size = 21.dp)
+                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Text(
+                                "Ad-free",
+                                color = Cream,
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Black,
+                            )
+                            Text(
+                                "Thanks for supporting Whaaack!",
+                                color = Color(0x9EFFF3E6),
+                                fontSize = 11.sp,
+                            )
+                        }
+                    }
+
+                    state.canBuyRemoveAds ->
+                        RemoveAdsButton(state.removeAdsPrice.orEmpty(), onClick = onRemoveAds)
+                }
+
+                // Always available, even when there is nothing to sell: this is the way back
+                // for someone who paid on another device or reinstalled.
+                ActionRow(
+                    "Restore purchases",
+                    "Already bought ad-free? Get it back here",
+                    onRestorePurchases,
                 )
 
                 if (privacyOptionsRequired) {

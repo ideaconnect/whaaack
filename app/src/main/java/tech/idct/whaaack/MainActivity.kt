@@ -107,7 +107,10 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        vm.audio.resumeMusic()
+        // Resumes the music and re-checks the ad-free entitlement — the latter is how a
+        // purchase completed while we were backgrounded gets picked up, and how a refund
+        // that was granted elsewhere eventually lands.
+        vm.onAppResumed()
     }
 
     override fun onPause() {
@@ -220,6 +223,7 @@ private fun WhaaackApp(vm: WhaaackViewModel, onGoogleSignIn: () -> Unit) {
                     onLeaderboard = { vm.go(Screen.LEADERBOARD) },
                     onSettings = { vm.go(Screen.SETTINGS) },
                     onLogout = { vm.signOut() },
+                    onRemoveAds = { activity?.let { vm.buyRemoveAds(it) } },
                 )
 
                 Screen.AUTH -> AuthScreen(
@@ -272,6 +276,8 @@ private fun WhaaackApp(vm: WhaaackViewModel, onGoogleSignIn: () -> Unit) {
                     onToggleHaptics = { vm.toggleHaptics(it) },
                     onToggleParallax = { vm.toggleParallax(it) },
                     onPrivacyOptions = { activity?.let { vm.showPrivacyOptions(it) } },
+                    onRemoveAds = { activity?.let { vm.buyRemoveAds(it) } },
+                    onRestorePurchases = { vm.restorePurchases() },
                     onChangeName = { vm.changeDisplayName(it) },
                     onChangeEmail = { vm.changeEmail(it) },
                     onChangePassword = { vm.changePassword(it) },

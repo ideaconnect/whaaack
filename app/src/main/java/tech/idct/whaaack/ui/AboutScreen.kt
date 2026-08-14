@@ -48,6 +48,7 @@ private val CREDITS = listOf(
 )
 
 private const val PRIVACY_URL = "https://idct.tech/whaaack/privacy"
+private const val TERMS_URL = "https://idct.tech/whaaack/terms"
 
 @Composable
 fun AboutScreen(onBack: () -> Unit) {
@@ -106,22 +107,10 @@ fun AboutScreen(onBack: () -> Unit) {
                 )
             }
 
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(18.dp))
-                    .background(Color(0x57140A1A))
-                    .border(1.dp, Hairline, RoundedCornerShape(18.dp))
-                    .clickableOnce(true) { open(PRIVACY_URL) }
-                    .padding(16.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    Text("Privacy policy", color = Cream, fontSize = 14.sp, fontWeight = FontWeight.Black)
-                    Text("idct.tech/whaaack/privacy", color = Color(0x9EFFF3E6), fontSize = 11.sp)
-                }
-                Text("↗", color = AccentLight, fontSize = 16.sp, fontWeight = FontWeight.Black)
-            }
+            // Both documents, not just the privacy policy: Play expects the terms to be
+            // reachable from inside the app once there is something to buy.
+            LinkRow("Privacy policy", "idct.tech/whaaack/privacy") { open(PRIVACY_URL) }
+            LinkRow("Terms & conditions", "idct.tech/whaaack/terms") { open(TERMS_URL) }
 
             Text(
                 "ASSETS USED",
@@ -169,5 +158,26 @@ fun AboutScreen(onBack: () -> Unit) {
                 Text("no moles were involved", color = Color(0xB8FFF3E6), fontSize = 11.sp)
             }
         }
+    }
+}
+
+/** One tappable row pointing at a page on the website. */
+@Composable
+private fun LinkRow(title: String, url: String, onClick: () -> Unit) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(18.dp))
+            .background(Color(0x57140A1A))
+            .border(1.dp, Hairline, RoundedCornerShape(18.dp))
+            .clickableOnce(true, onClick)
+            .padding(16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(title, color = Cream, fontSize = 14.sp, fontWeight = FontWeight.Black)
+            Text(url, color = Color(0x9EFFF3E6), fontSize = 11.sp)
+        }
+        Text("↗", color = AccentLight, fontSize = 16.sp, fontWeight = FontWeight.Black)
     }
 }

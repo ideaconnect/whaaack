@@ -57,6 +57,7 @@ fun HomeScreen(
     onLeaderboard: () -> Unit,
     onSettings: () -> Unit,
     onLogout: () -> Unit,
+    onRemoveAds: () -> Unit,
 ) {
     Column(
         Modifier
@@ -171,6 +172,14 @@ fun HomeScreen(
             if (state.sessionResolved && !state.signedIn) {
                 HomeChipButton("Create account", Modifier.weight(1f), onCreateAccount)
             }
+        }
+
+        // Only once Play has confirmed there is something to sell *and* that this player has
+        // not already bought it. Until then it is simply absent — no greyed-out teaser, and
+        // nothing at all for someone who already paid.
+        if (state.canBuyRemoveAds) {
+            Spacer(Modifier.height(10.dp))
+            RemoveAdsButton(price = state.removeAdsPrice.orEmpty(), onClick = onRemoveAds)
         }
     }
 }

@@ -1,0 +1,335 @@
+/* Whaaack! project site — self-contained, no framework.
+   Palette is lifted from the game itself (ui/theme/Theme.kt), so the site and the app
+   are visibly the same product. Dark-first, one warm accent, system font stack. */
+
+:root {
+  --cream: #fff3e6;
+  --cream-dim: rgba(255, 243, 230, .70);
+  --cream-faint: rgba(255, 243, 230, .48);
+  --night: #2a1633;
+  --bg: #140a1a;
+  --bg-2: #1b1024;
+  --panel: rgba(9, 20, 40, .55);
+  --panel-solid: #12233d;
+  --line: rgba(255, 243, 230, .14);
+  --line-strong: rgba(255, 243, 230, .28);
+  --accent: #ffc97a;
+  --accent-2: #f2704f;
+  --accent-ink: #43162f;
+  --gold: #f3c33c;
+  --danger: #ff8a7a;
+  --sky: #4c82d0;
+  --radius: 18px;
+  --radius-lg: 28px;
+  --maxw: 1080px;
+  --shadow: 0 18px 50px rgba(0, 0, 0, .45);
+}
+
+* { box-sizing: border-box; }
+
+html { scroll-behavior: smooth; }
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+
+body {
+  margin: 0;
+  /* clip, not hidden: hidden would make body a scroll container and break the sticky header. */
+  overflow-x: clip;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, Helvetica, Arial, sans-serif;
+  color: var(--cream);
+  background:
+    radial-gradient(1000px 560px at 78% -8%, rgba(255, 201, 122, .13), transparent 62%),
+    radial-gradient(760px 420px at -8% 8%, rgba(242, 112, 79, .10), transparent 58%),
+    var(--bg);
+  line-height: 1.65;
+  -webkit-font-smoothing: antialiased;
+}
+
+.wrap { width: min(var(--maxw), calc(100% - 40px)); margin-inline: auto; }
+
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+h1, h2, h3 { line-height: 1.15; margin: 0 0 .5em; font-weight: 900; letter-spacing: -.02em; }
+h1 { font-size: clamp(2.6rem, 7vw, 4.6rem); }
+h2 { font-size: clamp(1.7rem, 3.6vw, 2.5rem); }
+h3 { font-size: 1.12rem; }
+p { margin: 0 0 1em; }
+
+.eyebrow {
+  display: inline-block;
+  font-size: .72rem;
+  font-weight: 800;
+  letter-spacing: .22em;
+  text-transform: uppercase;
+  color: var(--cream-dim);
+  background: rgba(9, 20, 40, .6);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 7px 15px;
+  margin-bottom: 18px;
+}
+
+.lead { font-size: clamp(1.02rem, 2vw, 1.2rem); color: var(--cream-dim); max-width: 60ch; }
+
+/* ---- parallax orchard ------------------------------------------------------------- */
+
+.orchard {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  overflow: hidden;
+  background: linear-gradient(180deg, var(--sky) 0%, #3a5f9e 42%, var(--night) 100%);
+}
+.orchard span {
+  position: absolute;
+  left: 0;
+  width: 100%;
+  background-repeat: repeat-x;
+  background-position: 0 bottom;
+  image-rendering: pixelated;
+  will-change: transform;
+}
+.orchard .sky   { inset: 0; background-image: url("../img/bg/bg-sky.png");   background-size: auto 100%; opacity: .85; }
+.orchard .trees { bottom: 0; height: 63%; background-image: url("../img/bg/bg-trees.png"); background-size: auto 100%; }
+.orchard .hills { bottom: 0; height: 63%; background-image: url("../img/bg/bg-hills.png"); background-size: auto 100%; }
+.orchard .scrim {
+  inset: 0;
+  background: linear-gradient(180deg, rgba(20, 10, 26, .58) 0%, rgba(20, 10, 26, .74) 45%, rgba(20, 10, 26, .93) 100%);
+}
+
+/* ---- header ----------------------------------------------------------------------- */
+
+.site-header {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  backdrop-filter: blur(14px);
+  background: rgba(20, 10, 26, .72);
+  border-bottom: 1px solid var(--line);
+}
+.site-header .wrap {
+  display: flex;
+  align-items: center;
+  gap: 10px 14px;
+  min-height: 62px;
+  /* Wraps rather than overlapping the brand once the links no longer fit. */
+  flex-wrap: wrap;
+  padding-block: 8px;
+}
+.brand { display: flex; align-items: center; gap: 10px; font-weight: 900; font-size: 1.06rem; color: var(--cream); }
+.brand:hover { text-decoration: none; }
+.brand img { width: 30px; height: 30px; border-radius: 8px; image-rendering: pixelated; }
+.nav { margin-left: auto; display: flex; gap: 18px; flex-wrap: wrap; }
+.nav a { color: var(--cream-dim); font-size: .9rem; font-weight: 700; }
+.nav a:hover, .nav a[aria-current="page"] { color: var(--accent); text-decoration: none; }
+
+/* ---- buttons ---------------------------------------------------------------------- */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  font-weight: 900;
+  font-size: 1rem;
+  padding: 15px 26px;
+  border-radius: 20px;
+  border: 0;
+  cursor: pointer;
+  transition: transform .16s ease, box-shadow .16s ease, filter .16s ease;
+}
+.btn:hover { text-decoration: none; transform: translateY(-2px); }
+.btn-primary {
+  color: var(--accent-ink);
+  background: linear-gradient(135deg, var(--accent), var(--accent-2));
+  box-shadow: 0 6px 0 #a83c50, var(--shadow);
+}
+.btn-primary:hover { box-shadow: 0 8px 0 #a83c50, var(--shadow); }
+.btn-primary:active { transform: translateY(3px); box-shadow: 0 3px 0 #a83c50; }
+.btn-ghost { color: var(--cream); background: rgba(255, 243, 230, .12); border: 1px solid var(--line-strong); }
+.btn-block { width: 100%; }
+
+/* ---- hero ------------------------------------------------------------------------- */
+
+/* overflow-hidden because .fruit-field deliberately bleeds past the content column; without
+   it that bleed widens the document and every page scrolls sideways on a phone. */
+.hero { padding: clamp(52px, 8vw, 96px) 0 clamp(36px, 5vw, 64px); overflow: hidden; }
+/* The scattered fruit are positioned against this, so it has to be a containing block. */
+.hero .wrap { position: relative; }
+.hero-grid { display: grid; grid-template-columns: 1.05fr .95fr; gap: clamp(28px, 5vw, 64px); align-items: center; }
+@media (max-width: 860px) { .hero-grid { grid-template-columns: 1fr; } }
+
+.hero h1 { margin-bottom: .28em; }
+.hero h1 .shout {
+  background: linear-gradient(135deg, var(--accent) 15%, var(--accent-2) 85%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.hero-actions { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 28px; }
+
+.hero-stats { display: flex; gap: 26px; flex-wrap: wrap; margin-top: 34px; }
+.hero-stats div { min-width: 84px; }
+.hero-stats b { display: block; font-size: 1.55rem; font-weight: 900; color: var(--accent); }
+.hero-stats span { font-size: .68rem; font-weight: 800; letter-spacing: .16em; text-transform: uppercase; color: var(--cream-faint); }
+
+/* ---- phone frame ------------------------------------------------------------------ */
+
+.phone {
+  position: relative;
+  width: min(300px, 78vw);
+  margin-inline: auto;
+  aspect-ratio: 1080 / 2340;
+  border-radius: 34px;
+  padding: 9px;
+  background: linear-gradient(160deg, #4a3550, #1a1020);
+  box-shadow: var(--shadow), 0 0 0 1px rgba(255, 243, 230, .12);
+}
+.phone img { width: 100%; height: 100%; object-fit: cover; border-radius: 26px; display: block; }
+.phone::after {
+  content: "";
+  position: absolute;
+  top: 20px; left: 50%;
+  translate: -50% 0;
+  width: 78px; height: 5px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, .55);
+}
+.phone.tilt { rotate: -3deg; }
+.phone.tilt-r { rotate: 3deg; }
+
+/* ---- floating fruit --------------------------------------------------------------- */
+
+/* Decorative only: sits behind the hero copy, never intercepts a click. */
+/* Bleeds well past the content column so the fruit can sit outside the copy rather than
+   on top of it. Clipped by the viewport, not by this. */
+.fruit-field { position: absolute; inset: -8% -14%; pointer-events: none; z-index: 0; }
+.hero-grid { position: relative; z-index: 1; }
+.fruit-field img {
+  position: absolute;
+  width: 46px;
+  image-rendering: pixelated;
+  opacity: .9;
+  filter: drop-shadow(0 8px 14px rgba(0, 0, 0, .5));
+  animation: bob 6s ease-in-out infinite;
+}
+@keyframes bob {
+  0%, 100% { transform: translateY(0) rotate(-6deg); }
+  50%      { transform: translateY(-18px) rotate(6deg); }
+}
+@media (prefers-reduced-motion: reduce) { .fruit-field img { animation: none; } }
+
+/* ---- sections --------------------------------------------------------------------- */
+
+.section { padding: clamp(52px, 8vw, 96px) 0; position: relative; }
+.section-head { max-width: 62ch; margin-bottom: 40px; }
+
+.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 18px; }
+.card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  padding: 24px;
+  backdrop-filter: blur(6px);
+  transition: transform .2s ease, border-color .2s ease;
+}
+.card:hover { transform: translateY(-4px); border-color: var(--line-strong); }
+.card .ico { font-size: 1.7rem; display: block; margin-bottom: 10px; }
+.card .ico img { width: 38px; height: 38px; image-rendering: pixelated; }
+.card p { color: var(--cream-dim); font-size: .95rem; margin: 0; }
+
+.shots { display: flex; gap: 22px; overflow-x: auto; padding: 8px 4px 22px; scroll-snap-type: x mandatory; }
+.shots figure { margin: 0; flex: 0 0 auto; scroll-snap-align: center; text-align: center; }
+.shots figcaption { margin-top: 12px; font-size: .8rem; color: var(--cream-faint); font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+
+/* ---- ad-free strip ---------------------------------------------------------------- */
+
+.gold-strip {
+  background: rgba(243, 195, 60, .12);
+  border: 1px solid rgba(243, 195, 60, .45);
+  border-radius: var(--radius-lg);
+  padding: 26px;
+  display: flex;
+  gap: 20px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.gold-badge {
+  width: 54px; height: 54px;
+  flex: 0 0 auto;
+  display: grid; place-items: center;
+  border-radius: 16px;
+  background: rgba(243, 195, 60, .16);
+  border: 1px solid rgba(243, 195, 60, .55);
+}
+.gold-strip h3 { color: var(--gold); margin-bottom: 4px; }
+.gold-strip p { margin: 0; color: var(--cream-dim); font-size: .95rem; }
+
+/* ---- prose (legal pages) ---------------------------------------------------------- */
+
+.prose { max-width: 76ch; }
+.prose h2 { margin-top: 2.1em; font-size: 1.45rem; }
+.prose h3 { margin-top: 1.6em; color: var(--accent); font-size: 1.02rem; }
+.prose ul, .prose ol { padding-left: 1.25em; color: var(--cream-dim); }
+.prose li { margin-bottom: .5em; }
+.prose p { color: var(--cream-dim); }
+.prose strong { color: var(--cream); }
+.prose table { width: 100%; border-collapse: collapse; margin: 1.2em 0; font-size: .92rem; }
+.prose th, .prose td { text-align: left; padding: 11px 13px; border-bottom: 1px solid var(--line); vertical-align: top; }
+.prose th { color: var(--cream); font-weight: 800; }
+.prose td { color: var(--cream-dim); }
+.prose .table-scroll { overflow-x: auto; }
+
+.callout {
+  border-left: 3px solid var(--accent);
+  background: rgba(255, 201, 122, .09);
+  border-radius: 0 14px 14px 0;
+  padding: 16px 20px;
+  margin: 1.6em 0;
+}
+.callout p:last-child { margin-bottom: 0; }
+.callout.danger { border-left-color: var(--danger); background: rgba(226, 87, 76, .12); }
+
+.updated { font-size: .85rem; color: var(--cream-faint); }
+
+/* ---- contact form ----------------------------------------------------------------- */
+
+.contact-form { max-width: 560px; }
+.field { margin-bottom: 16px; }
+.field label { display: block; font-size: .74rem; font-weight: 900; letter-spacing: .14em; text-transform: uppercase; color: var(--cream-dim); margin-bottom: 7px; }
+.field input, .field textarea {
+  width: 100%;
+  padding: 13px 15px;
+  border-radius: 14px;
+  border: 1.5px solid var(--line-strong);
+  background: rgba(9, 20, 40, .6);
+  color: var(--cream);
+  font: inherit;
+  font-size: .96rem;
+}
+.field input:focus, .field textarea:focus { outline: 0; border-color: var(--accent); }
+.field textarea { resize: vertical; }
+.h-captcha { margin-bottom: 18px; }
+
+/* ---- footer ----------------------------------------------------------------------- */
+
+.footer { border-top: 1px solid var(--line); padding: 34px 0; margin-top: 40px; background: rgba(20, 10, 26, .72); }
+.footer .wrap { display: flex; gap: 16px; justify-content: space-between; flex-wrap: wrap; font-size: .86rem; color: var(--cream-faint); }
+.footer a { color: var(--cream-dim); }
+.footer nav { display: flex; gap: 14px; flex-wrap: wrap; }
+
+/* ---- scroll reveal (progressive enhancement; visible without JS) ------------------- */
+
+.reveal { opacity: 1; }
+.js .reveal { opacity: 0; transform: translateY(20px); transition: opacity .65s ease, transform .65s ease; }
+.js .reveal.in { opacity: 1; transform: none; }
+@media (prefers-reduced-motion: reduce) {
+  .js .reveal { opacity: 1; transform: none; transition: none; }
+}
+
+.skip-link {
+  position: absolute; left: -9999px;
+  background: var(--accent); color: var(--accent-ink);
+  padding: 10px 16px; border-radius: 0 0 12px 0; font-weight: 800; z-index: 100;
+}
+.skip-link:focus { left: 0; top: 0; }

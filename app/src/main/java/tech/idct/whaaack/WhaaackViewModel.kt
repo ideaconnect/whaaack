@@ -16,11 +16,13 @@ import kotlinx.serialization.json.JsonObject
 import tech.idct.whaaack.ads.AdsManager
 import tech.idct.whaaack.ads.ConsentManager
 import tech.idct.whaaack.audio.AudioEngine
+import tech.idct.whaaack.billing.BillingManager
 import tech.idct.whaaack.data.AuthError
 import tech.idct.whaaack.data.AuthRepository
 import tech.idct.whaaack.data.AuthResultException
 import tech.idct.whaaack.data.BoardRow
 import tech.idct.whaaack.data.BoardScope
+import tech.idct.whaaack.data.EntitlementStore
 import tech.idct.whaaack.data.GameSettings
 import tech.idct.whaaack.data.LeaderboardRepository
 import tech.idct.whaaack.data.Player
@@ -83,7 +85,20 @@ data class UiState(
     /** Mirrors ConsentManager, which is not observable and so cannot be read in composition. */
     val adsAvailable: Boolean = false,
     val privacyOptionsRequired: Boolean = false,
+    /**
+     * Null while the stored entitlement is still being read. Screens treat null as "not yet
+     * known" rather than as either answer, which is why the upsell does not flash on launch
+     * for someone who already paid.
+     */
+    val adsRemoved: Boolean? = null,
+    /** Localised price from Play, or null when there is nothing to sell. */
+    val removeAdsPrice: String? = null,
+    /** Set after a manual restore that could not reach Play, so Settings can say so. */
+    val restoreNote: String? = null,
 ) {
+    /** The upsell is only offered once we know they have not already bought it. */
+    val canBuyRemoveAds: Boolean get() = adsRemoved == false && removeAdsPrice != null
+
     val signedIn: Boolean get() = player != null
 }
 
@@ -101,6 +116,14 @@ class WhaaackViewModel(app: Application) : AndroidViewModel(app) {
     val audio = AudioEngine(app)
     val consent = ConsentManager(app)
     val ads = AdsManager(app, BuildConfig.ADMOB_INTERSTITIAL_AD_UNIT_ID, consent)
+
+    private val entitlements = EntitlementStore(app)
+    val billing = BillingManager(
+        context = app,
+        productId = BuildConfig.REMOVE_ADS_PRODUCT_ID,
+        store = entitlements,
+        scope = viewModelScope,
+    )
 
     private val _state = MutableStateFlow(UiState(backendConfigured = supabase.isConfigured))
     val state: StateFlow<UiState> = _state.asStateFlow()
@@ -132,6 +155,23 @@ class WhaaackViewModel(app: Application) : AndroidViewModel(app) {
             }
             _state.update { it.copy(assetsReady = assets != null) }
         }
+        // The entitlement drives the ad gate directly. AdsManager starts at null (ads
+        // suppressed), so nothing can slip through between launch and the first answer.
+        viewModelScope.launch {
+            billing.adsRemoved.collect { removed ->
+                ads.adsRemoved = removed
+                _state.update { it.copy(adsRemoved = removed) }
+                if (removed == false) ads.preload()
+            }
+        }
+        viewModelScope.launch {
+            billing.price.collect { details ->
+                val formatted = details?.oneTimePurchaseOfferDetails?.formattedPrice
+                _state.update { it.copy(removeAdsPrice = formatted) }
+            }
+        }
+        billing.start()
+
         viewModelScope.launch {
             val restored = auth.restore()
             // Both in one update: a frame that said "resolved" while `player` was still the
@@ -252,6 +292,41 @@ class WhaaackViewModel(app: Application) : AndroidViewModel(app) {
 
     fun showPrivacyOptions(activity: Activity) {
         consent.showPrivacyOptions(activity) { publishConsentState() }
+    }
+
+    // ---- remove ads ------------------------------------------------------------------
+
+    fun buyRemoveAds(activity: Activity) {
+        audio.blip()
+        val code = billing.launchPurchase(activity)
+        if (code != 0) {
+            _state.update { it.copy(
+                toast = "Google Play couldn't open the purchase — try again in a moment.",
+            ) }
+        }
+    }
+
+    /** For a player who reinstalled or switched device and wants their unlock back. */
+    fun restorePurchases() {
+        audio.blip()
+        billing.restore { check ->
+            val message = when (check) {
+                is BillingManager.Check.Owned -> "Ad-free restored. Thanks for the support!"
+                is BillingManager.Check.Pending -> "That purchase is still being confirmed by Google Play."
+                is BillingManager.Check.NotOwned -> "No purchase found on this Google account."
+                // Never phrased as "you don't own it": we could not ask, and saying otherwise
+                // to someone who paid is exactly the wrong answer.
+                is BillingManager.Check.Unknown -> "Couldn't reach Google Play — nothing has changed."
+            }
+            _state.update { it.copy(toast = message) }
+        }
+    }
+
+    fun onAppResumed() {
+        audio.resumeMusic()
+        // Re-checks the entitlement, which is also how a purchase completed while the app was
+        // in the background gets noticed.
+        billing.onResume()
     }
 
     /**

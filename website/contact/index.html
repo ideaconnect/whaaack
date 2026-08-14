@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Contact — Whaaack!</title>
+<meta name="description" content="Get in touch about Whaaack! — bug reports, questions, privacy requests and high scores.">
+<meta name="theme-color" content="#140a1a">
+<link rel="icon" href="../assets/img/icon/whaaack-512.png" type="image/png">
+<link rel="canonical" href="https://idct.tech/whaaack/contact/">
+<link rel="stylesheet" href="../assets/css/site.css">
+</head>
+<body>
+
+<a class="skip-link" href="#main">Skip to content</a>
+
+<div class="orchard" aria-hidden="true">
+  <span class="sky"></span>
+  <span class="trees"></span>
+  <span class="hills"></span>
+  <span class="scrim"></span>
+</div>
+
+<header class="site-header">
+  <div class="wrap">
+    <a class="brand" href="/whaaack/">
+      <img src="../assets/img/icon/whaaack-512.png" alt="">
+      Whaaack!
+    </a>
+    <nav class="nav">
+      <a href="/whaaack/">Home</a>
+      <a href="/whaaack/privacy/">Privacy</a>
+      <a href="/whaaack/terms/">Terms</a>
+      <a href="/whaaack/contact/" aria-current="page">Contact</a>
+    </nav>
+  </div>
+</header>
+
+<main id="main" class="section">
+  <div class="wrap">
+    <span class="eyebrow">Contact</span>
+    <h1 style="font-size:clamp(2rem,5vw,3rem)">Get in touch</h1>
+    <p class="lead">
+      Bug reports, questions about your data, refund problems, or a screenshot of a run you
+      are proud of — all of it lands in the same inbox.
+    </p>
+
+    <div class="callout">
+      <p>
+        <strong>Privacy or account requests</strong> (access, correction, deletion, a copy of
+        your data) are handled here too. Say which app account the request is about — the
+        email address you signed up with is enough. See the
+        <a href="/whaaack/privacy/">privacy policy</a> for what we hold and for how long.
+      </p>
+    </div>
+
+    <form class="contact-form reveal" action="https://api.web3forms.com/submit" method="POST">
+      <input type="hidden" name="access_key" value="5e20d39c-5128-4e9d-8b0c-dca5e50ac04c">
+      <input type="hidden" name="subject" value="New message from the Whaaack! website">
+      <input type="hidden" name="from_name" value="Whaaack! website">
+      <input type="hidden" name="redirect" value="https://idct.tech/whaaack/contact/thanks/">
+      <!-- Honeypot: bots fill it, humans never see it. -->
+      <input type="checkbox" name="botcheck" hidden tabindex="-1" autocomplete="off">
+
+      <div class="field">
+        <label for="name">Name</label>
+        <input type="text" name="name" id="name" placeholder="Your name" required>
+      </div>
+
+      <div class="field">
+        <label for="email">Email</label>
+        <input type="email" name="email" id="email" placeholder="you@example.com" required>
+      </div>
+
+      <div class="field">
+        <label for="message">Message</label>
+        <textarea name="message" id="message" rows="6" placeholder="What's on your mind?" required></textarea>
+      </div>
+
+      <div class="h-captcha" data-sitekey="50b2fe65-b00b-4b9e-ad62-3ba471098be2"></div>
+
+      <button type="submit" class="btn btn-primary btn-block">Send message</button>
+    </form>
+
+    <p class="updated" style="margin-top:22px">
+      The form is delivered by Web3Forms, which processes your message on our behalf and does
+      not use it for anything else. A plain <code>POST</code> is used rather than a background
+      request so the honest thing happens if JavaScript is off: the message still sends.
+    </p>
+  </div>
+</main>
+
+<footer class="footer">
+  <div class="wrap">
+    <span>© <span data-year>2026</span> <a href="https://idct.tech">IDCT · Bartosz Pacholek</a></span>
+    <nav>
+      <a href="/whaaack/">Home</a>
+      <a href="/whaaack/privacy/">Privacy</a>
+      <a href="/whaaack/terms/">Terms</a>
+      <a href="/whaaack/delete-account/">Delete account</a>
+      <a href="https://github.com/ideaconnect/whaaack">GitHub</a>
+    </nav>
+  </div>
+</footer>
+
+<script src="https://js.hcaptcha.com/1/api.js" async defer></script>
+<script src="../assets/js/site.js" defer></script>
+</body>
+</html>

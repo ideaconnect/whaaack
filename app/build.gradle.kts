@@ -51,6 +51,17 @@ android {
             "GOOGLE_WEB_CLIENT_ID",
             "\"${secret("GOOGLE_WEB_CLIENT_ID")}\"",
         )
+
+        // The one-time "remove ads" product, as created in the Play Console. The id below is
+        // a placeholder: the product does not exist yet, so Play answers the lookup with
+        // ITEM_UNAVAILABLE and BillingManager reports the store as simply having nothing to
+        // sell. The button hides itself in that state, so shipping before the product is
+        // created is safe — set the real id here (or in local.properties) when it exists.
+        buildConfigField(
+            "String",
+            "REMOVE_ADS_PRODUCT_ID",
+            "\"${secret("REMOVE_ADS_PRODUCT_ID", "whaaack_remove_ads")}\"",
+        )
     }
 
     buildTypes {
@@ -127,6 +138,8 @@ dependencies {
     implementation(libs.androidx.credentials)
     implementation(libs.androidx.credentials.play.services.auth)
     implementation(libs.googleid)
+
+    implementation(libs.billing.ktx)
 
     // GameEngine is deliberately free of Android types, so its rules are testable on the JVM.
     testImplementation(libs.junit)

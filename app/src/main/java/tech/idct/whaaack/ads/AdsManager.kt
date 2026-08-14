@@ -47,8 +47,23 @@ class AdsManager(
     /** Uptime the player last actually saw an ad, or 0 if they have not yet. */
     private var lastShownAtMs = 0L
 
+    /**
+     * Whether the player bought the ad-free unlock: true = owned, false = not owned,
+     * **null = not yet known**.
+     *
+     * The gate lives here rather than at each call site so that no future caller can forget
+     * it, and null counts as suppressed: the entitlement is read from disk asynchronously,
+     * and an ad slipped in during those few milliseconds is exactly the ad a paying player
+     * would never forgive.
+     */
+    @Volatile
+    var adsRemoved: Boolean? = null
+
+    private val adsAllowed: Boolean get() = adsRemoved == false
+
     /** Starts the Ads SDK. Safe to call repeatedly; no-ops without consent. */
     fun initialize(onReady: () -> Unit = {}) {
+        if (!adsAllowed) return
         if (!consent.canRequestAds) return
         if (initialised.getAndSet(true)) {
             onReady()
@@ -75,6 +90,7 @@ class AdsManager(
      */
     fun preload() {
         main.post {
+            if (!adsAllowed) return@post
             if (!consent.canRequestAds || adUnitId.isBlank()) return@post
             if (ad != null || loading) return@post
             loading = true
@@ -104,6 +120,12 @@ class AdsManager(
      * callback runs immediately, so the caller can treat this as "continue when done".
      */
     fun showThen(activity: Activity, onFinished: () -> Unit) {
+        // Paid, or not yet known to be unpaid: continue without so much as a preload.
+        if (!adsAllowed) {
+            onFinished()
+            return
+        }
+
         val ready = ad
         val capped = lastShownAtMs != 0L &&
             SystemClock.elapsedRealtime() - lastShownAtMs < MIN_GAP_MS
