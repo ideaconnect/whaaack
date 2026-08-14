@@ -31,7 +31,20 @@ enable_signup = true
 # Players must prove the address before their name can appear on a public leaderboard.
 enable_confirmations = true
 double_confirm_changes = true
-secure_password_change = true
+# Verified against the live project rather than reasoned about: with this on, a bare
+# PUT /auth/v1/user is accepted on a session under a day old and refused with
+# reauthentication_needed on one aged past it. So it never showed up in testing and would
+# have shipped as "Something went wrong" for returning players only.
+#
+# Turned off deliberately. What it protects against is somebody holding an unlocked phone
+# with a live session — and that same Settings screen already offers account deletion with
+# no reauthentication at all, so guarding the password while delete sits unguarded beside it
+# buys nothing. The alternative was a POST /auth/v1/reauthenticate round trip, which costs an
+# emailed nonce per password change out of the project-wide email budget that signups share.
+#
+# Note the recovery flow was never affected: a reset link mints a brand-new session, so
+# "forgot password" lands inside the carve-out and worked either way.
+secure_password_change = false
 max_frequency = "60s"
 otp_expiry = 1800
 

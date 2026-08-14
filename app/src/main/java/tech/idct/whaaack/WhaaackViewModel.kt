@@ -601,10 +601,23 @@ class WhaaackViewModel(app: Application) : AndroidViewModel(app) {
             _state.update { it.copy(sessionResolved = true) }
 
             if (type == "recovery") {
-                _state.update { it.copy(
-                    toast = "Signed in — set a new password below.",
-                ) }
-                navigate(Screen.SETTINGS)
+                // Settings only shows the password row for an email account (it is gated on
+                // `!player.isGoogle`), so sending a Google player there would land them on a
+                // screen with nothing to do and a toast telling them to do it. GoTrue sends a
+                // recovery mail for any address that exists, precisely so the endpoint cannot
+                // be used to enumerate accounts — which means this is reachable whenever
+                // somebody with a Google account taps "Forgot your password?".
+                if (auth.player.value?.isGoogle == true) {
+                    _state.update { it.copy(
+                        toast = "You're signed in. This account uses Google, so there's no password to reset.",
+                    ) }
+                    navigate(Screen.HOME)
+                } else {
+                    _state.update { it.copy(
+                        toast = "Signed in — set a new password below.",
+                    ) }
+                    navigate(Screen.SETTINGS)
+                }
             } else {
                 _state.update { it.copy(toast = "Email confirmed.") }
                 navigate(Screen.HOME)

@@ -16,14 +16,14 @@ See also: **[non-technical plan](GO-TO-PRODUCTION-NON-TECHNICAL.md)**.
 
 ## Where this stands
 
-**37 of 96 done.** Sections are ordered by when you need them, not by size.
+**38 of 96 done.** Sections are ordered by when you need them, not by size.
 
 | Section | Done |
 | --- | --- |
 | 1. Engineering decisions to settle first | 0 / 3 |
 | 2. Release engineering — the build has never been signed or run | 0 / 21 |
 | 3. Code — defects that block or damage the launch | **done** |
-| 4. Backend — Supabase | 5 / 21 |
+| 4. Backend — Supabase | 6 / 21 |
 | 5. Ads and billing — the code side | 1 / 13 |
 | 6. The website — markup, CSS and CI | 5 / 6 |
 | 7. Testing and QA | 0 / 6 |
@@ -646,7 +646,7 @@ reasoning survives.
   colliding signups produced `Collide`, `Collide 2`, `Collide 3` — the retry path that used to
   throw 23505. All test rows were removed afterwards; the database is unchanged.
 
-- [ ] **Trace the forgot-password flow end to end, and settle `secure_password_change`** 🔴
+- [x] **Trace the forgot-password flow end to end, and settle `secure_password_change`** — **traced and settled; one config push left**
   Nobody has followed the whole path. `sendPasswordReset` posts `/auth/v1/recover?redirect_to=
   whaaack://auth`; the deep link resolves the user, saves the session, and for `type == "recovery"`
   navigates to Settings telling the player to set a new password there; Settings then calls
@@ -662,8 +662,60 @@ reasoning survives.
   email against the send budget) or set `secure_password_change = false` and push. Two fixes are
   unconditional either way: add the `reauthentication_needed` case to `translate()`, and stop
   `changePassword` toasting "Password updated" without confirming the server changed anything.
-  Also check the recovery landing for a Google-provider account, since Settings gates the password
-  control on provider.
+  Also check the recovery landing case for a Google-provider account, since Settings gates the
+  password control on provider and a recovery link for a Google user would land on a screen with
+  no password field.
+
+  **Tested against the live project, and the warning in this item was the right one.** A
+  password change on a **brand-new session** returns **HTTP 200** — so it works, and a naive
+  test would have called this fine. On a session aged to two days (by updating
+  `auth.sessions.created_at` directly, the only way to reach it) the identical request returns
+  **HTTP 400 `reauthentication_needed`, "Password update requires reauthentication"**. The
+  defect is real and only a returning player ever meets it.
+
+  **One thing this item feared turns out not to be true: the recovery flow was never broken.**
+  A reset link mints a *fresh* session, which lands inside GoTrue's carve-out — so "forgot
+  password" always worked end to end. What was broken is the ordinary case: someone signed in
+  for more than a day opening Settings → Change password.
+
+  **And one claim here was overstated.** `changePassword` does not toast success on any
+  non-throwing return: `AuthRepository.call` rethrows a `SupabaseException` as an
+  `AuthResultException`, so a rejection never reaches the toast. The success message was
+  already conditional. The real defect was the *wording* — a rejection surfaced as
+  `AuthError.Unexpected`, i.e. "Something went wrong", on the one screen the player had just
+  been told to use.
+
+  **Settled: `secure_password_change = false`.** What it defends against is somebody holding an
+  unlocked phone with a live session — and that same Settings screen already offers **account
+  deletion with no reauthentication at all**, so guarding the password while delete sits
+  unguarded beside it buys nothing. The alternative, a `POST /auth/v1/reauthenticate` round
+  trip, costs an emailed nonce for every password change out of the project-wide `email_sent`
+  budget that signups share. The reasoning is written into `config.toml` beside the setting so
+  it is not silently flipped back.
+
+  **Done in code, and these hold regardless of the config:**
+  a new `AuthError.NeedsRecentSignIn` mapped from `reauthentication_needed`, whose copy names
+  the actual way out — sign out and back in, which mints a fresh session and makes the change
+  work immediately. That means the feature is usable *today*, before the push. The mapping was
+  also extracted to a free `translateAuthError(code, message)` function so it can be tested on
+  the JVM at all (`AuthRepository` needs a `SupabaseClient`, which needs DataStore, which needs
+  Android), with six tests covering the stale-session code, the message-only fallback, case
+  insensitivity, and that unrecognised codes keep the server's own words.
+
+  **The Google dead end is closed too.** Settings gates the password row on `!player.isGoogle`,
+  and GoTrue sends a recovery mail for any address that exists — deliberately, so the endpoint
+  cannot be used to enumerate accounts. So a Google player tapping "Forgot your password?" got
+  a working link that dropped them on a screen with no password field and a toast telling them
+  to use it. They now land on Home with a message saying the account uses Google and has no
+  password to reset.
+
+  **Remaining: one `supabase config push`.** It is entangled with the Google-provider item
+  below — a push sends the *whole* auth config, so it would enable Google remotely at the same
+  time, which is gated on publishing the OAuth consent screen. Do the two together. Note also
+  that **`config push` has no `--dry-run`** in CLI 2.113.0 (checked), so there is no way to
+  preview it: every `env(...)` must be exported in that same shell or it is written through as
+  the literal string, and that includes `RESEND_API_KEY` — which would replace the SMTP
+  password that is currently working.
 
 - [ ] **Move to a paid Supabase plan** 🔴
   The project (`pklrfcbyseitdbxkmsnw`, Postgres 17.6, aws-1-eu-west-1 — good, the data stays in the

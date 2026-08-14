@@ -58,6 +58,17 @@ sealed class AuthError(val title: String, val body: String) {
         "You can change your display name once every 30 days.",
     )
 
+    /**
+     * GoTrue's `secure_password_change` refuses a password change on a session older than a
+     * day unless it carries a reauthentication nonce. The app sends no nonce, so this is what
+     * a returning player gets — and the copy has to be actionable, because signing out and
+     * back in mints a fresh session and makes the change work immediately.
+     */
+    data object NeedsRecentSignIn : AuthError(
+        "Sign in again first",
+        "For your security this change needs a fresh sign-in. Log out, sign back in, and try again.",
+    )
+
     data object Offline : AuthError(
         "No connection",
         "Whaaack! couldn't reach the server. Your casual runs still work offline.",
@@ -277,31 +288,45 @@ class AuthRepository(private val client: SupabaseClient) {
         throw AuthResultException(AuthError.Offline)
     }
 
-    private fun translate(e: SupabaseClient.SupabaseException): AuthError {
-        val text = e.message.lowercase()
-        val code = e.errorCode?.lowercase().orEmpty()
-        return when {
-            code == "user_already_exists" || text.contains("already registered") ||
-                text.contains("already been registered") -> AuthError.EmailTaken
+    private fun translate(e: SupabaseClient.SupabaseException): AuthError =
+        translateAuthError(e.errorCode, e.message)
+}
 
-            code == "email_not_confirmed" || text.contains("not confirmed") ->
-                AuthError.NotConfirmed
+/**
+ * The server's answer, turned into something a player can read and act on.
+ *
+ * A free function rather than a method so it can be tested on the JVM: [AuthRepository] needs
+ * a [SupabaseClient], which needs a DataStore, which needs Android — and this mapping is
+ * exactly the part that was wrong (a `reauthentication_needed` rejection surfaced as
+ * "Something went wrong" on the one screen the player had just been told to use).
+ */
+internal fun translateAuthError(errorCode: String?, message: String): AuthError {
+    val text = message.lowercase()
+    val code = errorCode?.lowercase().orEmpty()
+    return when {
+        code == "user_already_exists" || text.contains("already registered") ||
+            text.contains("already been registered") -> AuthError.EmailTaken
 
-            code == "invalid_credentials" || text.contains("invalid login") ->
-                AuthError.WrongPassword
+        code == "email_not_confirmed" || text.contains("not confirmed") ->
+            AuthError.NotConfirmed
 
-            code == "weak_password" || text.contains("password should be") ->
-                AuthError.WeakPassword
+        code == "invalid_credentials" || text.contains("invalid login") ->
+            AuthError.WrongPassword
 
-            text.contains("display_name_cooldown") -> AuthError.NameCooldown
+        code == "weak_password" || text.contains("password should be") ->
+            AuthError.WeakPassword
 
-            // 23505 is Postgres' unique-violation; here it can only be the display name.
-            code == "23505" || text.contains("duplicate key") -> AuthError.NameTaken
+        code == "reauthentication_needed" || text.contains("requires reauthentication") ->
+            AuthError.NeedsRecentSignIn
 
-            text.contains("invalid email") || text.contains("unable to validate email") ->
-                AuthError.BadEmail
+        text.contains("display_name_cooldown") -> AuthError.NameCooldown
 
-            else -> AuthError.Unexpected(e.message)
-        }
+        // 23505 is Postgres' unique-violation; here it can only be the display name.
+        code == "23505" || text.contains("duplicate key") -> AuthError.NameTaken
+
+        text.contains("invalid email") || text.contains("unable to validate email") ->
+            AuthError.BadEmail
+
+        else -> AuthError.Unexpected(message)
     }
 }
