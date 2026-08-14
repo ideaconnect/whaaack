@@ -31,6 +31,15 @@ class GameEngineTest {
         }
     }
 
+    /**
+     * Ends the run the way a player does: the End-run control takes two presses, the first
+     * only arming it. Tests that care about the guard itself press explicitly instead.
+     */
+    private fun GameEngine.endRun(nowNs: Long) {
+        assertEquals(GameEngine.QuitPress.ARMED, requestQuit(nowNs))
+        assertEquals(GameEngine.QuitPress.CONFIRMED, requestQuit(nowNs))
+    }
+
     /** Runs the countdown out and returns the clock at the first live frame. */
     private fun GameEngine.begin(): Long {
         start(ranked = true, nowNs = 0L)
@@ -144,7 +153,7 @@ class GameEngineTest {
         engine.update(now)
         assertEquals(GameEngine.Phase.COUNTDOWN, engine.phase)
 
-        engine.requestQuit()
+        engine.endRun(now)
         engine.update(now)
 
         val result = results.single()
@@ -202,7 +211,7 @@ class GameEngineTest {
         now += 2_000 * MS
         engine.update(now)
 
-        engine.requestQuit()
+        engine.endRun(now)
         engine.update(now)
 
         assertEquals(GameEngine.Phase.OVER, engine.phase)
@@ -240,7 +249,7 @@ class GameEngineTest {
         engine.update(FRAME)
         assertEquals(GameEngine.Phase.COUNTDOWN, engine.phase)
 
-        engine.requestQuit()
+        engine.endRun(FRAME)
         engine.update(2 * FRAME)
 
         val result = results.single()
@@ -290,25 +299,109 @@ class GameEngineTest {
     // ---- the difficulty curve ----------------------------------------------------------
 
     @Test
-    fun `difficulty and the speed readout stop at the same level`() {
+    fun `top speed is the level the board fills, and the readout clamps there`() {
         val top = GameEngine.TOP_SPEED_LEVEL
-        assertTrue("top speed should be reached during a plausible run", top in 1..60)
+        assertTrue("the board should fill during a plausible run", top in 1..60)
 
-        // TOP_SPEED_LEVEL is meant to be the exact point both tracks bottom out.
-        assertTrue(
-            GameEngine.spawnIntervalMs(top - 1) > GameEngine.spawnIntervalMs(top) ||
-                GameEngine.fruitLifeMs(top - 1) > GameEngine.fruitLifeMs(top),
-        )
-        assertEquals(GameEngine.spawnIntervalMs(top), GameEngine.spawnIntervalMs(top + 25))
-        assertEquals(GameEngine.fruitLifeMs(top), GameEngine.fruitLifeMs(top + 25))
+        // TOP_SPEED_LEVEL now means "the last slot has opened", not "the pace stopped".
+        assertEquals(GameEngine.MAX_TARGETS, GameEngine.targetsAtLevel(top))
+        assertTrue(GameEngine.targetsAtLevel(top - 1) < GameEngine.MAX_TARGETS)
 
+        // Everything the player *reads* still clamps, because there is nothing further to show.
         assertEquals(1f, GameEngine.speedFraction(top), 0.0001f)
         assertEquals(1f, GameEngine.speedFraction(top + 25), 0.0001f)
         assertEquals(0f, GameEngine.speedFraction(0), 0.0001f)
-
         assertEquals(top + 1, GameEngine.displaySpeed(top + 25))
         assertTrue(GameEngine.isTopSpeed(top))
         assertTrue(!GameEngine.isTopSpeed(top - 1))
+
+        // And the score column it feeds stays inside the server-side plausibility check,
+        // which rejects top_speed above 64.
+        assertTrue("displaySpeed must stay under the scores.top_speed constraint",
+            GameEngine.displaySpeed(100_000) <= 64)
+    }
+
+    @Test
+    fun `the run never stops getting harder`() {
+        // This is the whole point of the curve rewrite. It used to flatten completely at
+        // level 10, so past forty seconds the score measured stamina rather than skill and
+        // the all-time best would have been set by whoever kept holding the phone longest.
+        var previousPressure = Double.MAX_VALUE
+        // Asserted across the whole reachable range and then some. The board fills at
+        // TOP_SPEED_LEVEL, and sixteen fruit sharing sixteen tiles ends any run long before
+        // this loop does — so every level tested here is already past what anyone survives.
+        for (level in 0..GameEngine.TOP_SPEED_LEVEL) {
+            val targets = GameEngine.targetsAtLevel(level)
+            val life = GameEngine.fruitLifeMs(level)
+            val interval = GameEngine.spawnIntervalMs(level)
+            // Fruit arriving per second: the rate the player actually has to keep up with.
+            val pressure = targets * 1000.0 / (interval * 0.35 + life)
+            assertTrue(
+                "difficulty must never plateau — level $level matched level ${level - 1}",
+                level == 0 || pressure > previousPressure,
+            )
+            previousPressure = pressure
+        }
+
+        // Past that point the pace tail does eventually flatten, because life and interval are
+        // whole milliseconds and the geometric decay per level falls below 1ms somewhere around
+        // level 66. That is not the old problem coming back: concurrency has been pinned at one
+        // fruit per tile since TOP_SPEED_LEVEL, which is the thing that actually ends runs. It
+        // is recorded here so the flattening is understood rather than rediscovered as a bug.
+        assertEquals(GameEngine.MAX_TARGETS, GameEngine.targetsAtLevel(GameEngine.TOP_SPEED_LEVEL))
+        assertTrue(GameEngine.fruitLifeMs(200) < GameEngine.fruitLifeMs(GameEngine.TOP_SPEED_LEVEL))
+    }
+
+    @Test
+    fun `the pace tightens for ever without ever degenerating`() {
+        for (level in 1..500) {
+            val life = GameEngine.fruitLifeMs(level)
+            val interval = GameEngine.spawnIntervalMs(level)
+            // Monotonically decreasing, never a step back up...
+            assertTrue(
+                "life rose at level $level",
+                life <= GameEngine.fruitLifeMs(level - 1),
+            )
+            assertTrue(
+                "interval rose at level $level",
+                interval <= GameEngine.spawnIntervalMs(level - 1),
+            )
+            // ...but never into nonsense. A zero-millisecond fruit is not difficulty, it is a
+            // broken game: it would expire on the frame it spawned, unhittable by anyone.
+            assertTrue("fruit life collapsed at level $level", life >= 250)
+            assertTrue("spawn interval collapsed at level $level", interval >= 100)
+        }
+    }
+
+    @Test
+    fun `the tuned opening is untouched by the endless tail`() {
+        // Regression guard. Levels 0..8 were tuned deliberately (commit b91938f) and the
+        // rewrite is meant to be strictly additive: identical up to the knee, new after it.
+        val expectedLife = intArrayOf(1550, 1415, 1280, 1145, 1010, 875, 740, 605, 470)
+        val expectedInterval = intArrayOf(900, 828, 756, 684, 612, 540, 468, 396, 324)
+        for (level in expectedLife.indices) {
+            assertEquals("life at level $level", expectedLife[level], GameEngine.fruitLifeMs(level))
+            assertEquals("interval at level $level", expectedInterval[level], GameEngine.spawnIntervalMs(level))
+        }
+        // The slot ladder's opening is likewise unchanged.
+        assertEquals(2, GameEngine.targetsAtLevel(0))
+        assertEquals(2, GameEngine.targetsAtLevel(4))
+        assertEquals(3, GameEngine.targetsAtLevel(5))
+        assertEquals(4, GameEngine.targetsAtLevel(6))
+    }
+
+    @Test
+    fun `slots open every three levels and stop at one per tile`() {
+        assertEquals(4, GameEngine.targetsAtLevel(8))
+        assertEquals(5, GameEngine.targetsAtLevel(9))
+        assertEquals(5, GameEngine.targetsAtLevel(11))
+        assertEquals(6, GameEngine.targetsAtLevel(12))
+
+        // The cap is physical: a seventeenth fruit has no tile to stand on.
+        assertEquals(GameEngine.TILE_COUNT, GameEngine.MAX_TARGETS)
+        assertEquals(GameEngine.MAX_TARGETS, GameEngine.targetsAtLevel(GameEngine.TOP_SPEED_LEVEL))
+        assertEquals(GameEngine.MAX_TARGETS, GameEngine.targetsAtLevel(10_000))
+        assertEquals(GameEngine.MAX_TARGETS, engine().slots.size)
     }
 
     /**
@@ -376,12 +469,144 @@ class GameEngineTest {
     }
 
     @Test
+    fun `a saturated board never stacks two fruit on one tile`() {
+        // The endgame the old curve could never reach. Once the ladder asks for one fruit per
+        // tile, "pick a free tile" has no slack left in it — and the previous implementation
+        // fell back to placing a second fruit on an occupied tile when the search ran dry,
+        // which makes one of them unwhackable and costs a strike nothing could prevent.
+        val engine = engine()
+        var now = engine.begin()
+
+        // A perfect player: tap everything on the board every frame. Nothing ever expires, so
+        // strikes stay at zero and the clock can be driven all the way to a full board.
+        var guard = 0
+        while (engine.level < GameEngine.TOP_SPEED_LEVEL && guard++ < 40_000) {
+            now += FRAME
+            engine.update(now)
+            for (fruit in engine.slots) fruit?.let { engine.postTap(it.tile) }
+        }
+        assertEquals("perfect play must not accrue strikes", 0, engine.strikes)
+        assertEquals(GameEngine.Phase.RUNNING, engine.phase)
+        assertEquals(GameEngine.MAX_TARGETS, GameEngine.targetsAtLevel(engine.level))
+
+        // Now stop tapping and let it fill up. The run will end on three strikes shortly, but
+        // the board saturates first — that window is the thing under test.
+        var mostSeen = 0
+        guard = 0
+        while (engine.phase == GameEngine.Phase.RUNNING && guard++ < 2_000) {
+            now += FRAME
+            engine.update(now)
+            val tiles = engine.slots.filterNotNull().map { it.tile }
+            mostSeen = maxOf(mostSeen, tiles.size)
+            assertEquals("fruit stacked on one tile: $tiles", tiles.size, tiles.distinct().size)
+            assertTrue("more fruit than tiles: ${tiles.size}", tiles.size <= GameEngine.TILE_COUNT)
+        }
+        assertTrue(
+            "expected the board to crowd up; only ever saw $mostSeen fruit at once",
+            mostSeen >= GameEngine.TILE_COUNT / 2,
+        )
+    }
+
+    // ---- the End-run guard ---------------------------------------------------------------
+
+    @Test
+    fun `one press of End run does not end the run`() {
+        val engine = engine()
+        var now = engine.begin()
+        now += 2_000 * MS
+        engine.update(now)
+
+        // The whole point. Fourteen dp below a board the player is hammering sits a control
+        // that used to end the run on first touch.
+        assertEquals(GameEngine.QuitPress.ARMED, engine.requestQuit(now))
+        engine.update(now)
+        assertEquals(GameEngine.Phase.RUNNING, engine.phase)
+        assertTrue("nothing should have been reported", results.isEmpty())
+        assertTrue("the control should show as armed", engine.quitArmedUntilNs > now)
+    }
+
+    @Test
+    fun `a second press inside the window ends it`() {
+        val engine = engine()
+        var now = engine.begin()
+        now += 2_000 * MS
+        engine.update(now)
+
+        engine.requestQuit(now)
+        now += 400 * MS
+        assertEquals(GameEngine.QuitPress.CONFIRMED, engine.requestQuit(now))
+        engine.update(now)
+
+        assertEquals(GameEngine.Phase.OVER, engine.phase)
+        assertTrue(results.single().quit)
+    }
+
+    @Test
+    fun `the arm lapses, so a stray press cannot be completed much later`() {
+        val engine = engine()
+        var now = engine.begin()
+        now += 2_000 * MS
+        engine.update(now)
+
+        engine.requestQuit(now)
+        now += (GameEngine.QUIT_ARM_MS + 50) * MS
+        engine.update(now)
+        // Past the window the next press is a fresh arm, not a confirmation.
+        assertEquals(GameEngine.QuitPress.ARMED, engine.requestQuit(now))
+        engine.update(now)
+        assertEquals(GameEngine.Phase.RUNNING, engine.phase)
+    }
+
+    @Test
+    fun `whacking a fruit disarms it`() {
+        val engine = engine()
+        var now = engine.begin()
+        now += 500 * MS
+        engine.update(now)
+
+        engine.requestQuit(now)
+        assertTrue(engine.quitArmedUntilNs > now)
+
+        // This is what makes the guard strong rather than merely present: a player who
+        // clipped the pill by accident is back on the board within milliseconds, and that
+        // clears the arm — so ending a run by accident needs two stray presses AND no fruit
+        // tapped in between.
+        val fruit = engine.slots.filterNotNull().first()
+        engine.postTap(fruit.tile)
+        assertEquals(0L, engine.quitArmedUntilNs)
+
+        now += 100 * MS
+        assertEquals(GameEngine.QuitPress.ARMED, engine.requestQuit(now))
+        engine.update(now)
+        assertEquals(GameEngine.Phase.RUNNING, engine.phase)
+    }
+
+    @Test
+    fun `being interrupted disarms it`() {
+        val engine = engine()
+        var now = engine.begin()
+        now += 1_000 * MS
+        engine.update(now)
+
+        engine.requestQuit(now)
+        engine.pause(now)
+        assertEquals("coming back to a half-armed quit button is not a thing", 0L, engine.quitArmedUntilNs)
+    }
+
+    @Test
+    fun `a press outside a run is ignored`() {
+        val engine = engine()
+        assertEquals(GameEngine.QuitPress.IGNORED, engine.requestQuit(0L))
+        assertEquals(0L, engine.quitArmedUntilNs)
+    }
+
+    @Test
     fun `starting a run clears the previous one`() {
         val engine = engine()
         var now = engine.begin()
         now += 2_000 * MS
         engine.update(now)
-        engine.requestQuit()
+        engine.endRun(now)
         engine.update(now)
 
         engine.start(ranked = false, nowNs = now)
@@ -391,5 +616,67 @@ class GameEngineTest {
         assertEquals(0, engine.hits)
         assertTrue(engine.splats.isEmpty())
         assertTrue(engine.slots.all { it == null })
+    }
+
+    // ---- banking an interrupted run ------------------------------------------------------
+
+    @Test
+    fun `an idle engine has nothing to bank`() {
+        assertEquals(0L, engine().survivedMillisIfLive())
+    }
+
+    @Test
+    fun `a live run reports what it has survived so far`() {
+        val engine = engine()
+        var now = engine.begin()
+        now += 5_000 * MS
+        engine.update(now)
+
+        assertEquals(engine.elapsedMs, engine.survivedMillisIfLive())
+        assertTrue("a live run must have something to bank", engine.survivedMillisIfLive() > 0L)
+    }
+
+    @Test
+    fun `a run interrupted during the opening countdown banks nothing`() {
+        val engine = engine()
+        engine.start(ranked = true, nowNs = 0L)
+        assertEquals(GameEngine.Phase.COUNTDOWN, engine.phase)
+        // Nothing has been survived yet, so there is no score to rescue from a process kill.
+        assertEquals(0L, engine.survivedMillisIfLive())
+    }
+
+    @Test
+    fun `a finished run banks nothing — onGameOver already delivered the score`() {
+        val engine = engine()
+        var now = engine.begin()
+        now += 3_000 * MS
+        engine.update(now)
+        engine.endRun(now)
+        engine.update(now)
+        // Quitting runs the outro out before the phase settles on OVER.
+        now += GameEngine.OUTRO_MS * MS + FRAME
+        engine.update(now)
+
+        assertEquals(GameEngine.Phase.OVER, engine.phase)
+        assertEquals(
+            "a run that already reported its result must not be banked a second time",
+            0L,
+            engine.survivedMillisIfLive(),
+        )
+    }
+
+    @Test
+    fun `banking is unaffected by the clock being paused`() {
+        val engine = engine()
+        var now = engine.begin()
+        now += 2_000 * MS
+        engine.update(now)
+        val live = engine.survivedMillisIfLive()
+
+        // This is the real sequence: the render thread stops, the clock is suspended, and
+        // only then does the score get banked.
+        engine.pause(now)
+        assertEquals(live, engine.survivedMillisIfLive())
+        assertTrue(live > 0L)
     }
 }

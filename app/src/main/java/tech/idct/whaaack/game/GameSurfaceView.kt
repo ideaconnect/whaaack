@@ -3,12 +3,18 @@ package tech.idct.whaaack.game
 import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.Canvas
+import android.os.Build
+import android.os.Process
 import android.util.AttributeSet
 import android.view.MotionEvent
+import android.view.Surface
 import android.view.SurfaceHolder
 import android.view.SurfaceView
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
+import androidx.lifecycle.DefaultLifecycleObserver
+import androidx.lifecycle.LifecycleOwner
+import androidx.lifecycle.findViewTreeLifecycleOwner
 
 /**
  * Hosts the game on a dedicated render thread.
@@ -42,6 +48,16 @@ class GameSurfaceView @JvmOverloads constructor(
         fun onGameOver(result: GameEngine.Result)
         fun onHit(fruit: Fruit)
         fun onStrike(strikes: Int)
+
+        /**
+         * A live run was suspended without finishing — backgrounded, or the window became
+         * too small to play in. Delivered on the main thread so the elapsed time can be
+         * banked; the process may not survive to deliver [onGameOver].
+         */
+        fun onRunInterrupted(millisSurvived: Long)
+
+        /** The End-run control was armed and is waiting for a confirming press. */
+        fun onQuitArmed()
     }
 
     val engine = GameEngine()
@@ -68,6 +84,27 @@ class GameSurfaceView @JvmOverloads constructor(
 
     @Volatile
     private var reportedOver = false
+
+    /**
+     * Stops the thread at ON_STOP rather than waiting for `surfaceDestroyed`.
+     *
+     * Leaving the game screen disposes the composition first, so `stopRendering` has normally
+     * already run by the time the surface goes — but backgrounding *during a run* does not
+     * dispose anything, and then `surfaceDestroyed` is the first thing to call it. That runs
+     * on the main thread and blocks on an unbounded `join()` while the render thread may be
+     * sitting inside `lockHardwareCanvas()` waiting on the buffer queue, plus up to 48ms of
+     * drain. Under GPU pressure that is an unbounded main-thread block on the single most
+     * common lifecycle transition in the app — an ANR shape, and the likeliest source of ANRs
+     * in this codebase. ON_STOP arrives before the surface is destroyed, so by the time
+     * `surfaceDestroyed` runs the thread is already joined and the drain window has passed.
+     */
+    private val lifecycleObserver = object : DefaultLifecycleObserver {
+        override fun onStop(owner: LifecycleOwner) {
+            stopRendering()
+        }
+    }
+
+    private var observedLifecycle: LifecycleOwner? = null
 
     init {
         holder.addCallback(this)
@@ -121,10 +158,14 @@ class GameSurfaceView @JvmOverloads constructor(
         pendingStart = ranked
     }
 
-    fun quitRun() {
+    /**
+     * A press of the End-run control. The first arms it, a second inside the arming window
+     * confirms — see [GameEngine.requestQuit].
+     */
+    fun quitRun(): GameEngine.QuitPress {
         // Handled by the engine on the next frame rather than here: tearing the run down
         // from the UI thread would rewrite `slots` and `phase` under the render thread.
-        engine.requestQuit()
+        return engine.requestQuit(System.nanoTime())
     }
 
     /**
@@ -136,6 +177,12 @@ class GameSurfaceView @JvmOverloads constructor(
         thread = null
         if (running == null) return
         running.shutdown()
+        // Bank whatever was survived before the clock stops. A backgrounded process holding
+        // ~4.6 MB of bitmaps is a routine kill on a 2 GB device, and the local best is only
+        // otherwise written in onGameOver — so without this, a killed run loses the score as
+        // well as the run. Reported after the thread is joined, so the engine is quiescent.
+        val survived = engine.survivedMillisIfLive()
+        if (survived > 0L) post { callbacks?.onRunInterrupted(survived) }
         // unlockCanvasAndPost hands the frame to HWUI's shared render thread, which finishes
         // it asynchronously, so the last buffer may still be dequeued for a few vsyncs after
         // our own thread has gone. Note when that window closes rather than sleeping through
@@ -174,7 +221,9 @@ class GameSurfaceView @JvmOverloads constructor(
         val y = event.getY(pointer)
 
         if (renderer.endRunRect.contains(x, y)) {
-            quitRun()
+            // Arming is worth a sound: it is the only feedback that the press registered but
+            // did not do the thing, and silence there reads as an unresponsive button.
+            if (quitRun() == GameEngine.QuitPress.ARMED) callbacks?.onQuitArmed()
             return true
         }
         val tile = renderer.tileAt(x, y)
@@ -182,7 +231,17 @@ class GameSurfaceView @JvmOverloads constructor(
         return true
     }
 
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
+        findViewTreeLifecycleOwner()?.let { owner ->
+            observedLifecycle = owner
+            owner.lifecycle.addObserver(lifecycleObserver)
+        }
+    }
+
     override fun onDetachedFromWindow() {
+        observedLifecycle?.lifecycle?.removeObserver(lifecycleObserver)
+        observedLifecycle = null
         // Runs before the surface is torn down, which is the calmest moment to stop.
         stopRendering()
         super.onDetachedFromWindow()
@@ -195,6 +254,8 @@ class GameSurfaceView @JvmOverloads constructor(
         // instead of counting the absence as survived time.
         engine.resume(System.nanoTime())
         renderer.resetFrameClock()
+        renderer.density = resources.displayMetrics.density
+        requestFrameRate(holder)
         val t = RenderThread(holder)
         thread = t
         t.start()
@@ -205,7 +266,32 @@ class GameSurfaceView @JvmOverloads constructor(
         // straight off the window root. This callback is on the main thread and runs after
         // layout, so the values are settled by now.
         readRootInsets()
+        // Density can change under a surviving view: it is in the activity's configChanges
+        // list, so Settings > Display > Display size never recreates anything.
+        renderer.density = resources.displayMetrics.density
+        requestFrameRate(holder)
         thread?.resize(width, height)
+    }
+
+    /**
+     * Asks the compositor for 60 Hz.
+     *
+     * The loop's only pacing is `lockHardwareCanvas` blocking on the buffer queue, so it
+     * otherwise runs at whatever the panel refreshes at — 120 Hz, sometimes 144 — for a game
+     * whose fastest fruit lives 430ms. That is two to two-and-a-half times the GPU work,
+     * battery draw and heat for no gameplay benefit whatsoever, on top of roughly 3.5x
+     * full-screen overdraw per frame. FIXED_SOURCE tells the compositor this is content with
+     * an inherent rate rather than a preference, which is what lets it pick a divisor of the
+     * display rate cleanly.
+     */
+    private fun requestFrameRate(holder: SurfaceHolder) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return
+        runCatching {
+            holder.surface.setFrameRate(
+                TARGET_FPS.toFloat(),
+                Surface.FRAME_RATE_COMPATIBILITY_FIXED_SOURCE,
+            )
+        }
     }
 
     override fun surfaceDestroyed(holder: SurfaceHolder) {
@@ -268,6 +354,12 @@ class GameSurfaceView @JvmOverloads constructor(
         }
 
         override fun run() {
+            // The main thread being busy must not cost frames on a reflex game. DISPLAY is
+            // the band HWUI's own render thread runs in, which is exactly the company this
+            // loop keeps.
+            runCatching { Process.setThreadPriority(Process.THREAD_PRIORITY_DISPLAY) }
+
+            var lastFrameNs = 0L
             while (running) {
                 val sheet = assets
                 if (sheet == null) {
@@ -307,10 +399,44 @@ class GameSurfaceView @JvmOverloads constructor(
                     continue
                 }
 
+                // A window too small to hold a board is not a board you can lose on. The
+                // renderer already declines to draw one; without this the clock and the
+                // strikes would carry on behind it, so a player who dragged the game into a
+                // split-screen pane would come back to a run they had already lost. Pause
+                // the clock instead and let surfaceChanged bring it back. (The manifest
+                // declares resizeableActivity="false", so this should be unreachable — but
+                // free-form and desktop windowing do not always honour that.)
+                if (!renderer.boardDrawable) {
+                    engine.pause(System.nanoTime())
+                    try {
+                        sleep(32)
+                    } catch (_: InterruptedException) {
+                        break
+                    }
+                    continue
+                }
+                engine.resume(System.nanoTime())
+
                 // Re-check immediately before acquiring a buffer so a teardown that began
                 // while the previous frame was drawing stops us here instead of leaving a
                 // buffer dequeued.
                 if (!running || !surfaceHolder.surface.isValid) break
+
+                // setFrameRate is a hint the compositor may decline, so the cap is also
+                // enforced here. Without either, the loop free-runs at the panel rate —
+                // 120 Hz or more — for a game whose simulation is entirely time-based and
+                // gains nothing above 60.
+                val beforeLockNs = System.nanoTime()
+                val sinceLastNs = beforeLockNs - lastFrameNs
+                if (lastFrameNs != 0L && sinceLastNs < FRAME_BUDGET_NS) {
+                    try {
+                        sleep((FRAME_BUDGET_NS - sinceLastNs) / 1_000_000L)
+                    } catch (_: InterruptedException) {
+                        break
+                    }
+                    if (!running) break
+                }
+                lastFrameNs = System.nanoTime()
 
                 val canvas = lockCanvas() ?: break
                 try {
@@ -343,5 +469,8 @@ class GameSurfaceView @JvmOverloads constructor(
     private companion object {
         /** Roughly three vsyncs at 60 Hz. */
         const val HWUI_DRAIN_MS = 48L
+
+        const val TARGET_FPS = 60
+        const val FRAME_BUDGET_NS = 1_000_000_000L / TARGET_FPS
     }
 }

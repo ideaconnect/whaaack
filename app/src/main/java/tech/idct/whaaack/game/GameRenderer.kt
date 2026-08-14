@@ -7,6 +7,7 @@ import android.graphics.Color
 import android.graphics.LinearGradient
 import android.graphics.Matrix
 import android.graphics.Paint
+import android.graphics.Path
 import android.graphics.RadialGradient
 import android.graphics.Rect
 import android.graphics.RectF
@@ -22,7 +23,17 @@ import kotlin.random.Random
  * Draws the whole play screen — parallax orchard, board, HUD and overlays — onto whatever
  * Canvas it is handed. Owned and driven exclusively by the render thread.
  */
-class GameRenderer(private val density: Float) {
+class GameRenderer(density: Float) {
+
+    /**
+     * Re-read on every surface change rather than captured once. `density` is in the
+     * activity's configChanges list, so changing Settings > Display > Display size while the
+     * game screen is open does not recreate the activity and does not re-run AndroidView's
+     * factory — this renderer survives with the old value, and every dp() below then sizes
+     * the card, the board and the pill for a density the device no longer has.
+     */
+    @Volatile
+    var density: Float = density
 
     private fun dp(v: Float) = v * density
 
@@ -74,6 +85,10 @@ class GameRenderer(private val density: Float) {
     private val dstRect = RectF()
     private val tmpRect = RectF()
 
+    /** Reused, never reallocated: this is on the per-frame path and allocation there is the
+     *  one thing the render loop is careful about. */
+    private val clipPath = Path()
+
     private var skyShader: BitmapShader? = null
     private var treeShader: BitmapShader? = null
     private var hillShader: BitmapShader? = null
@@ -105,6 +120,14 @@ class GameRenderer(private val density: Float) {
     private var boardLeft = 0f
     private var boardTop = 0f
     private var tileSize = 0f
+
+    /**
+     * False when the viewport leaves no room for a playable board — below roughly 280dp of
+     * usable height, which in practice means split-screen or a free-form window. The board
+     * already declines to draw at that point; this is what stops the run continuing to be
+     * lost behind it. See GameSurfaceView's render loop.
+     */
+    val boardDrawable: Boolean get() = tileSize > 0f
     private var tileGap = 0f
     private var boardInset = 0f
     private val cardRect = RectF()
@@ -221,7 +244,7 @@ class GameRenderer(private val density: Float) {
         drawTopBar(canvas, engine)
         drawScoreCard(canvas, engine)
         drawBoard(canvas, engine, assets, nowNs)
-        drawEndRun(canvas)
+        drawEndRun(canvas, engine, nowNs)
         drawOutro(canvas, engine, assets, nowNs)
         drawCountdown(canvas, engine)
     }
@@ -373,17 +396,59 @@ class GameRenderer(private val density: Float) {
         canvas.drawText("${engine.hits} HITS", barRight, barTop + dp(20f), label)
     }
 
-    private fun drawEndRun(canvas: Canvas) {
+    /**
+     * The End-run pill, in one of two states.
+     *
+     * Resting it is quiet on purpose — it sits fourteen dp under a board the player is
+     * hammering, and should not invite a press. Armed it is the opposite: the first press
+     * does not end the run, so this has to say so loudly enough that a player who hit it by
+     * accident notices before pressing again. It fills with a warning tint, the label changes
+     * to a question, and the remaining arming window drains left to right so the state
+     * visibly has a deadline rather than looking stuck.
+     */
+    private fun drawEndRun(canvas: Canvas, engine: GameEngine, nowNs: Long) {
+        val armedUntil = engine.quitArmedUntilNs
+        val remaining = if (armedUntil == 0L) 0f else {
+            ((armedUntil - nowNs).toFloat() / (GameEngine.QUIT_ARM_MS * 1_000_000f))
+                .coerceIn(0f, 1f)
+        }
+        val armed = remaining > 0f
+        val radius = dp(14f)
+
         fill.reset()
         fill.isAntiAlias = true
-        fill.color = 0x33091428
-        canvas.drawRoundRect(endRunRect, dp(14f), dp(14f), fill)
-        stroke.color = 0x33FFF3E6
-        canvas.drawRoundRect(endRunRect, dp(14f), dp(14f), stroke)
+        fill.color = if (armed) 0x4DF2704F else 0x33091428
+        canvas.drawRoundRect(endRunRect, radius, radius, fill)
+
+        if (armed) {
+            // The window draining away. Clipped to the pill so the bar keeps its rounded ends.
+            canvas.save()
+            clipPath.reset()
+            clipPath.addRoundRect(endRunRect, radius, radius, Path.Direction.CW)
+            canvas.clipPath(clipPath)
+            fill.color = 0x59F2704F
+            canvas.drawRect(
+                endRunRect.left,
+                endRunRect.top,
+                endRunRect.left + endRunRect.width() * remaining,
+                endRunRect.bottom,
+                fill,
+            )
+            canvas.restore()
+        }
+
+        stroke.color = if (armed) 0xB8F2704F.toInt() else 0x33FFF3E6
+        canvas.drawRoundRect(endRunRect, radius, radius, stroke)
+
         label.textSize = dp(12f)
         label.textAlign = Paint.Align.CENTER
-        label.color = 0xA8FFF3E6.toInt()
-        canvas.drawText("End run", endRunRect.centerX(), endRunRect.centerY() + dp(4f), label)
+        label.color = if (armed) 0xFFFFF3E6.toInt() else 0xA8FFF3E6.toInt()
+        canvas.drawText(
+            if (armed) "End run?" else "End run",
+            endRunRect.centerX(),
+            endRunRect.centerY() + dp(4f),
+            label,
+        )
     }
 
     // ---- board -------------------------------------------------------------------------

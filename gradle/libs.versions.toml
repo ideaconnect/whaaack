@@ -6,7 +6,10 @@ lifecycle = "2.8.7"
 activityCompose = "1.9.3"
 composeBom = "2024.12.01"
 datastore = "1.1.1"
-okhttp = "4.12.0"
+# 5.x verified against this app rather than its release notes: compiles, 15 unit tests pass,
+# R8 full-mode release builds with no missing_rules.txt, lintVitalRelease clean, and the
+# transitive okhttp-android it now pulls adds no permission to the merged manifest.
+okhttp = "5.1.0"
 serialization = "1.7.3"
 coroutines = "1.9.0"
 # 25.4.0 pulls user-messaging-platform 4.0.0 transitively (via play-services-ads-api),

@@ -18,6 +18,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -36,6 +37,12 @@ import tech.idct.whaaack.ui.theme.AccentInk
 import tech.idct.whaaack.ui.theme.AccentLight
 import tech.idct.whaaack.ui.theme.Cream
 import tech.idct.whaaack.ui.theme.Hairline
+import java.time.DayOfWeek
+import java.time.LocalDate
+import java.time.ZoneOffset
+import java.time.format.DateTimeFormatter
+import java.time.temporal.TemporalAdjusters
+import java.util.Locale
 
 @Composable
 fun LeaderboardScreen(
@@ -58,6 +65,22 @@ fun LeaderboardScreen(
             selectedIndex = BoardScope.entries.indexOf(state.boardScope),
             onSelect = { onScopeChange(BoardScope.entries[it]) },
         )
+
+        // Which week "this week" actually is. The board is cut server-side at Monday 00:00
+        // UTC, which is 02:00 Monday for a Polish player in summer and the *previous* Sunday
+        // evening for most of the Americas — so a board that silently emptied overnight looked
+        // like a bug rather than a reset. Naming the window is the whole fix.
+        if (state.boardScope == BoardScope.WEEKLY) {
+            Spacer(Modifier.height(10.dp))
+            Text(
+                remember(state.boardScope) { currentUtcWeekLabel() },
+                color = Color(0x8AFFF3E6),
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
 
         Spacer(Modifier.height(14.dp))
         Box(Modifier.weight(1f)) {
@@ -183,4 +206,30 @@ private fun CenteredNote(text: String) {
             textAlign = TextAlign.Center,
         )
     }
+}
+
+/**
+ * "Mon 10 - Sun 16 Aug, UTC" for the week the server is currently counting.
+ *
+ * Mirrors `public.current_week_start()`, which is
+ * `date_trunc('week', now() at time zone 'utc') at time zone 'utc'` — Postgres truncates to
+ * the ISO week, so that is Monday 00:00 UTC, and the window runs to the next Monday 00:00 UTC
+ * exclusive. Verified against the live database, including under hostile session timezones:
+ * the instant is the same everywhere, only its rendering differs.
+ *
+ * Computed in UTC here for exactly that reason — using the device's zone would name a
+ * different week for anyone east of London on a Sunday night.
+ */
+private fun currentUtcWeekLabel(): String = utcWeekLabel(LocalDate.now(ZoneOffset.UTC))
+
+/** The formatting half, split out from the clock so it can be tested at the awkward dates. */
+internal fun utcWeekLabel(today: LocalDate): String {
+    val monday = today.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
+    val sunday = monday.plusDays(6)
+    val dayMonth = DateTimeFormatter.ofPattern("d MMM", Locale.US)
+    val day = DateTimeFormatter.ofPattern("d", Locale.US)
+    // Drop the repeated month when the week does not straddle one: "10 - 16 Aug", not
+    // "10 Aug - 16 Aug".
+    val from = if (monday.month == sunday.month) monday.format(day) else monday.format(dayMonth)
+    return "Mon $from - Sun ${sunday.format(dayMonth)}, UTC"
 }

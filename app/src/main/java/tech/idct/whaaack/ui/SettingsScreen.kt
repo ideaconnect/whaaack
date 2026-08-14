@@ -32,6 +32,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import tech.idct.whaaack.BuildConfig
 import tech.idct.whaaack.UiState
 import tech.idct.whaaack.ui.theme.AccentInk
 import tech.idct.whaaack.ui.theme.Cream
@@ -246,7 +247,7 @@ fun SettingsScreen(
                             .padding(horizontal = 16.dp, vertical = 8.dp),
                     ) {
                         Text(
-                            "Whaaack! v1.0 · About & credits",
+                            "Whaaack! v${BuildConfig.VERSION_NAME} · About & credits",
                             color = Color(0xD9FFF3E6),
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,

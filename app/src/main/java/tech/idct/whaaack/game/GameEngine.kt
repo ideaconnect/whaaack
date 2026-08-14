@@ -2,7 +2,6 @@ package tech.idct.whaaack.game
 
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.atomic.AtomicBoolean
-import kotlin.math.max
 import kotlin.math.min
 import kotlin.random.Random
 
@@ -96,6 +95,16 @@ class GameEngine(private val random: Random = Random.Default) {
     var countdownValue: Int = 0
         private set
 
+    /**
+     * Nanotime the End-run control disarms itself, or 0 when it is not armed.
+     *
+     * Read by the renderer every frame so the pill can show that it is waiting for a second
+     * press, and how long it will keep waiting.
+     */
+    @Volatile
+    var quitArmedUntilNs: Long = 0L
+        private set
+
     private var startNs = 0L
     private var countdownEndsNs = 0L
     private val nextSpawnNs = LongArray(MAX_TARGETS)
@@ -134,6 +143,7 @@ class GameEngine(private val random: Random = Random.Default) {
         pausedAtNs = 0L
         resumingRun = false
         openTargets = BASE_TARGETS
+        quitArmedUntilNs = 0L
     }
 
     /**
@@ -146,19 +156,50 @@ class GameEngine(private val random: Random = Random.Default) {
      */
     fun postTap(tile: Int) {
         if (phase != Phase.RUNNING) return
-        if (tile in 0 until TILE_COUNT) pendingTaps.add(tile)
+        if (tile !in 0 until TILE_COUNT) return
+        // Going back to hitting fruit disarms the End-run control. This is what makes the
+        // two-press guard actually strong: an accidental press is cleared by the very next
+        // tap the player makes, and at speed that is milliseconds away — so "two stray
+        // presses inside the arming window" additionally requires the player to have hit
+        // nothing at all in between. It costs the deliberate path nothing, because someone
+        // quitting on purpose is not whacking fruit between the two presses.
+        quitArmedUntilNs = 0L
+        pendingTaps.add(tile)
     }
 
     /**
-     * Asks for the run to end early without it counting as a loss (the "End run" button).
+     * The "End run" control. **Two presses**, not one.
+     *
+     * The board is deliberately forgiving — [postTap] takes a second thumb, and the renderer
+     * maps every point inside the board card to the nearest tile so a near-miss is never
+     * stolen. Fourteen density-independent pixels below that sits a control that used to end
+     * the run instantly, on the first touch, with no way back. At the late levels the player
+     * is tapping several times a second across sixteen tiles including the bottom row, an
+     * inch above it. One fumble was the worst possible way to lose a record run.
+     *
+     * So the first press only *arms* it, for [QUIT_ARM_MS]; a second press inside that window
+     * confirms. It disarms itself when the window passes, and immediately if the player taps
+     * any tile (see [postTap]).
      *
      * Only a flag is set here: the run is torn down on the render thread inside [update],
      * because a caller on the UI thread cannot safely rewrite `slots` and `phase` while a
      * frame is being simulated.
      */
-    fun requestQuit() {
-        quitRequested.set(true)
+    fun requestQuit(nowNs: Long): QuitPress {
+        if (phase != Phase.RUNNING && phase != Phase.COUNTDOWN) return QuitPress.IGNORED
+
+        val armedUntil = quitArmedUntilNs
+        if (armedUntil != 0L && nowNs < armedUntil) {
+            quitArmedUntilNs = 0L
+            quitRequested.set(true)
+            return QuitPress.CONFIRMED
+        }
+        quitArmedUntilNs = nowNs + QUIT_ARM_MS * NS_PER_MS
+        return QuitPress.ARMED
     }
+
+    /** What a press of the End-run control did, so the caller can sound it appropriately. */
+    enum class QuitPress { ARMED, CONFIRMED, IGNORED }
 
     /**
      * Suspends the clock. Every deadline the run holds is expressed as an absolute nanotime,
@@ -166,13 +207,33 @@ class GameEngine(private val random: Random = Random.Default) {
      * would come back to a score inflated by however long they were away and to fruit that
      * expired in their absence.
      *
-     * Call only while the render thread is stopped — [pause] and [resume] deliberately do no
-     * locking because [GameSurfaceView] brackets them around the thread's lifetime.
+     * [pause] and [resume] deliberately do no locking. Two callers are safe for two different
+     * reasons: [GameSurfaceView.stopRendering] and `surfaceCreated` call them with the render
+     * thread stopped, and the render loop itself calls them (when the window becomes too
+     * small to hold a board) from the very thread that owns this state. Both are idempotent —
+     * each returns immediately if the clock is already in the requested state.
      */
     fun pause(nowNs: Long) {
         if (pausedAtNs != 0L) return
         if (phase != Phase.COUNTDOWN && phase != Phase.RUNNING && phase != Phase.OUTRO) return
         pausedAtNs = nowNs
+        // Whatever the player was doing, they are not doing it now. The arm deadline is an
+        // absolute nanotime and is deliberately not shifted by resume(), so coming back to a
+        // half-armed quit button is not a thing that can happen.
+        quitArmedUntilNs = 0L
+    }
+
+    /**
+     * Milliseconds survived so far if a run is genuinely in progress, otherwise zero.
+     *
+     * For banking a score that may never reach [Listener.onGameOver]: a backgrounded process
+     * can be killed at any moment, and the run then disappears along with it. [Phase.OUTRO]
+     * counts — the run is over and the score is final, it is only the animation that has not
+     * finished. [Phase.OVER] does not, because `onGameOver` has already been delivered.
+     */
+    fun survivedMillisIfLive(): Long = when (phase) {
+        Phase.RUNNING, Phase.COUNTDOWN, Phase.OUTRO -> elapsedMs
+        Phase.IDLE, Phase.OVER -> 0L
     }
 
     /**
@@ -294,6 +355,9 @@ class GameEngine(private val random: Random = Random.Default) {
                     scheduleRespawn(i, nowNs)
                 }
             } else if (nowNs >= nextSpawnNs[i]) {
+                // A full board is not an error and not a strike — the slot just waits. Only
+                // reschedule on success, so a blocked slot retries promptly rather than
+                // sitting out a whole interval it never got to use.
                 spawn(i, nowNs, lifeMs)
             }
         }
@@ -348,6 +412,8 @@ class GameEngine(private val random: Random = Random.Default) {
         var splatOnly = -1
         for (offset in 1..TILE_COUNT) {
             val candidate = (from + offset) % TILE_COUNT
+            // A tile still holding fruit is never a candidate, at any price. A splat is
+            // cosmetic and can be drawn under a new fruit; a second fruit cannot.
             if (tileHasFruit(candidate)) continue
             if (!tileBusy(candidate)) return candidate
             if (splatOnly < 0) splatOnly = candidate
@@ -355,17 +421,25 @@ class GameEngine(private val random: Random = Random.Default) {
         return if (splatOnly >= 0) splatOnly else null
     }
 
-    private fun spawn(slot: Int, nowNs: Long, lifeMs: Int) {
+    /**
+     * Places a fruit, or reports that the board had nowhere to put one.
+     *
+     * Returning false rather than forcing a placement is what makes a full board safe. Two
+     * fruit on one tile is not a cosmetic problem: one tap clears only one of them, and the
+     * other is left to expire into a strike the player could not have prevented. That used to
+     * be a rare fallback when the random probe ran dry; once the ladder climbs past four
+     * concurrent fruit it would be the normal case, and at sixteen — one per tile — it would
+     * be guaranteed. So a slot that cannot be filled simply stays empty and tries again on a
+     * later frame, which also means the board self-limits: concurrency can never actually
+     * exceed the number of tiles, whatever the ladder asks for.
+     */
+    private fun spawn(slot: Int, nowNs: Long, lifeMs: Int): Boolean {
         // Scanned rather than collected into a set: there are only a few slots and a
         // handful of splats, and this runs several times a second at top speed.
         var tile = random.nextInt(TILE_COUNT)
         var guard = 0
         while (tileBusy(tile) && guard++ < TILE_COUNT * 2) tile = random.nextInt(TILE_COUNT)
-        // Three fruit and their splats cover far more of the board than two did, so the
-        // random probe runs dry often enough to matter. A splat underneath is only cosmetic;
-        // a second fruit on the same tile is not, because one tap clears only one of them
-        // and the other is left to expire into a strike the player could not have prevented.
-        if (tileBusy(tile)) tile = firstFreeTile(tile) ?: tile
+        if (tileBusy(tile)) tile = firstFreeTile(tile) ?: return false
 
         slots[slot] = ActiveFruit(
             tile = tile,
@@ -373,6 +447,7 @@ class GameEngine(private val random: Random = Random.Default) {
             bornNs = nowNs,
             lifeMs = lifeMs,
         )
+        return true
     }
 
     private fun scheduleRespawn(slot: Int, nowNs: Long) {
@@ -422,23 +497,46 @@ class GameEngine(private val random: Random = Random.Default) {
         const val TILE_COLUMNS = 4
         const val TILE_ROWS = 4
         const val TILE_COUNT = TILE_COLUMNS * TILE_ROWS
-        /** Slots available at the hardest point in a run. */
-        const val MAX_TARGETS = 4
+        /**
+         * Slots available at the hardest point in a run — one per tile.
+         *
+         * This is a physical ceiling, not a tuning knob: a seventeenth concurrent fruit has
+         * nowhere to go on a 4x4 board. [spawn] enforces the same thing independently by
+         * refusing to place a fruit on an occupied tile, so the board self-limits even if the
+         * ladder below is ever retuned to ask for more.
+         */
+        const val MAX_TARGETS = TILE_COUNT
 
         /** Slots a run opens with. */
         const val BASE_TARGETS = 2
 
-        // Levels at which each further slot opens. The HUD reads `level + 1`, so these are
-        // the points where the speed readout ticks to 6 and to 7: two fruit through the
-        // fifth gear, three in the sixth, four from the seventh on.
+        // Levels at which the third and fourth slots open. The HUD reads `level + 1`, so
+        // these are the points where the speed readout ticks to 6 and to 7: two fruit through
+        // the fifth gear, three in the sixth, four from the seventh on. Left exactly as tuned.
         const val THIRD_TARGET_LEVEL = 5
         const val FOURTH_TARGET_LEVEL = 6
 
-        /** How many slots cycle at [level]. */
+        /** Levels between each further slot opening, once the tuned opening is past. */
+        const val TARGET_STEP_LEVELS = 3
+
+        /**
+         * How many slots cycle at [level].
+         *
+         * The opening is untouched — two fruit, a third at level 5, a fourth at level 6, all
+         * as tuned. What changed is that it no longer stops there: from the fourth slot on, one
+         * more opens every [TARGET_STEP_LEVELS] levels until the board is full.
+         *
+         * That is what makes a run end. The curve used to flatten completely at level 10, so
+         * past forty seconds nothing got harder ever again and the score stopped measuring
+         * skill and started measuring stamina — the all-time best would be set by whoever was
+         * most willing to keep holding a phone, and would be effectively unbeatable. Now the
+         * board fills at level [TOP_SPEED_LEVEL], and sixteen fruit sharing sixteen tiles is
+         * not survivable by anybody. Runs terminate on their own.
+         */
         fun targetsAtLevel(level: Int): Int = when {
-            level >= FOURTH_TARGET_LEVEL -> 4
-            level >= THIRD_TARGET_LEVEL -> 3
-            else -> BASE_TARGETS
+            level < THIRD_TARGET_LEVEL -> BASE_TARGETS
+            level < FOURTH_TARGET_LEVEL -> 3
+            else -> min(4 + (level - FOURTH_TARGET_LEVEL) / TARGET_STEP_LEVELS, MAX_TARGETS)
         }
 
         const val MAX_STRIKES = 3
@@ -450,6 +548,13 @@ class GameEngine(private val random: Random = Random.Default) {
          * the board before it starts moving again.
          */
         const val RESUME_COUNTDOWN_MS = 2_000
+
+        /**
+         * How long the End-run control stays armed after a first press. Long enough to be a
+         * deliberate double-press, short enough that an accidental arm is gone before the
+         * player could stumble into it again.
+         */
+        const val QUIT_ARM_MS = 1_600L
 
         const val OUTRO_MS = 1_500
         const val SPLAT_LIFE_MS = 1_100
@@ -463,42 +568,69 @@ class GameEngine(private val random: Random = Random.Default) {
         private const val SPAWN_GAP = 0.35f
         private const val SPAWN_JITTER = 0.45f
 
-        // Difficulty curve. Both tracks ramp linearly per level and then hold at a floor;
-        // the floors are what "top speed" actually means, so they are named rather than
-        // repeated as literals — the HUD's speed bar reads its bounds from them too.
+        // Difficulty curve. Both tracks ramp linearly per level exactly as tuned, down to a
+        // knee; past the knee they keep tightening, but geometrically toward a hard floor
+        // rather than linearly into absurdity. So the pace never stops increasing, and it also
+        // never reaches a fruit life of zero, which would not be "hard" so much as broken.
+        //
+        // The knee values are the old flat floors, so every level up to and including the knee
+        // behaves precisely as it did before this change.
         private const val START_INTERVAL_MS = 900
-        private const val MIN_INTERVAL_MS = 200
+        private const val KNEE_INTERVAL_MS = 200
+        private const val FLOOR_INTERVAL_MS = 120
         private const val INTERVAL_STEP_MS = 72
 
         private const val START_LIFE_MS = 1_550
-        private const val MIN_LIFE_MS = 430
+        private const val KNEE_LIFE_MS = 430
+        private const val FLOOR_LIFE_MS = 300
         private const val LIFE_STEP_MS = 135
 
-        /** Gap between spawns, tightening as the run goes on. */
+        /**
+         * Per-level multiplier applied past the knee. Deliberately gentle: the concurrency
+         * ladder is what carries the late difficulty, and compounding a steep pace decay on
+         * top of a growing fruit count makes the endgame collapse in a couple of levels
+         * instead of tightening.
+         */
+        private const val TAIL_DECAY = 0.97
+
+        /**
+         * Linear while [start] - level x [step] is still above [knee], then an asymptotic
+         * approach from [knee] down toward [floor]. Continuous at the knee by construction:
+         * at zero levels past it the decay term is 1, which yields exactly [knee].
+         */
+        private fun rampThenDecay(level: Int, start: Int, step: Int, knee: Int, floor: Int): Int {
+            val linear = start - level * step
+            if (linear >= knee) return linear
+            // Ceiling division: the first level whose linear value has dropped to the knee.
+            val kneeLevel = (start - knee + step - 1) / step
+            var decayed = (knee - floor).toDouble()
+            repeat(level - kneeLevel) { decayed *= TAIL_DECAY }
+            return floor + decayed.toInt()
+        }
+
+        /** Gap between spawns, tightening as the run goes on and never levelling off. */
         fun spawnIntervalMs(level: Int): Int =
-            max(MIN_INTERVAL_MS, START_INTERVAL_MS - level * INTERVAL_STEP_MS)
+            rampThenDecay(level, START_INTERVAL_MS, INTERVAL_STEP_MS, KNEE_INTERVAL_MS, FLOOR_INTERVAL_MS)
 
         /** How long a fruit stays whackable, shrinking as the run goes on. */
         fun fruitLifeMs(level: Int): Int =
-            max(MIN_LIFE_MS, START_LIFE_MS - level * LIFE_STEP_MS)
+            rampThenDecay(level, START_LIFE_MS, LIFE_STEP_MS, KNEE_LIFE_MS, FLOOR_LIFE_MS)
 
         /**
-         * The level at which both tracks have reached their floor and nothing gets harder.
-         * Derived rather than written down so it cannot drift out of step with the curve.
-         * Everything the player *reads* as speed — the bar, the number, the parallax — is
-         * clamped to this, because past it the run genuinely is not speeding up any more.
+         * The level at which the board fills and no further slot can open.
+         *
+         * This used to mean "both pace tracks have bottomed out", which stopped being a
+         * meaningful idea once they stopped bottoming out. It now marks the point at which the
+         * *last* thing that can get harder has finished getting harder — every tile occupied.
+         * Derived rather than written down so it cannot drift out of step with the ladder.
+         * Everything the player reads as speed — the bar, the number, the parallax — is
+         * clamped to it.
          */
         val TOP_SPEED_LEVEL: Int = run {
             var candidate = 0
-            // Bounded: a curve retuned so that neither track ever reaches its floor would
-            // otherwise hang class initialisation here rather than fail somewhere visible.
-            while (
-                candidate < 1_000 &&
-                (spawnIntervalMs(candidate) > MIN_INTERVAL_MS ||
-                    fruitLifeMs(candidate) > MIN_LIFE_MS)
-            ) {
-                candidate++
-            }
+            // Bounded: a ladder retuned so the board never fills would otherwise hang class
+            // initialisation here rather than fail somewhere legible.
+            while (candidate < 1_000 && targetsAtLevel(candidate) < MAX_TARGETS) candidate++
             candidate
         }
 

@@ -76,10 +76,8 @@ data class UiState(
     val boardError: String? = null,
     val standing: Standing? = null,
     val lastRun: RunSummary? = null,
-    val assetsReady: Boolean = false,
     val resetEmailSent: String? = null,
     val toast: String? = null,
-    val backendConfigured: Boolean = true,
     /** Increments once per account operation that completed without error. */
     val actionSucceeded: Int = 0,
     /** Mirrors ConsentManager, which is not observable and so cannot be read in composition. */
@@ -93,8 +91,6 @@ data class UiState(
     val adsRemoved: Boolean? = null,
     /** Localised price from Play, or null when there is nothing to sell. */
     val removeAdsPrice: String? = null,
-    /** Set after a manual restore that could not reach Play, so Settings can say so. */
-    val restoreNote: String? = null,
 ) {
     /** The upsell is only offered once we know they have not already bought it. */
     val canBuyRemoveAds: Boolean get() = adsRemoved == false && removeAdsPrice != null
@@ -125,7 +121,7 @@ class WhaaackViewModel(app: Application) : AndroidViewModel(app) {
         scope = viewModelScope,
     )
 
-    private val _state = MutableStateFlow(UiState(backendConfigured = supabase.isConfigured))
+    private val _state = MutableStateFlow(UiState())
     val state: StateFlow<UiState> = _state.asStateFlow()
 
     var assets: GameAssets? = null
@@ -153,15 +149,27 @@ class WhaaackViewModel(app: Application) : AndroidViewModel(app) {
                 audio.preload()
                 assets = runCatching { GameAssets.load(getApplication()) }.getOrNull()
             }
-            _state.update { it.copy(assetsReady = assets != null) }
+            // Nothing to publish: every screen branches on `vm.assets == null` directly.
         }
         // The entitlement drives the ad gate directly. AdsManager starts at null (ads
         // suppressed), so nothing can slip through between launch and the first answer.
         viewModelScope.launch {
             billing.adsRemoved.collect { removed ->
                 ads.adsRemoved = removed
-                _state.update { it.copy(adsRemoved = removed) }
-                if (removed == false) ads.preload()
+                _state.update { it.copy(
+                    adsRemoved = removed,
+                    // Not adsAvailable(): inside this block _state still holds the previous
+                    // adsRemoved, so it would answer for the state we are replacing.
+                    adsAvailable = consent.canRequestAds && removed == false,
+                ) }
+                // initialize(), not preload(). AdsManager refuses to initialise while the
+                // entitlement is unknown — the deliberate paid-player guard — and the only
+                // other caller is the consent callback, which can land first. When it does,
+                // `initialised` stays false and nothing ever sets it, so InterstitialAd.load
+                // goes out with MobileAds.initialize never having run: a documented
+                // precondition violated, and any mediation adapter left uninitialised.
+                // initialize() is idempotent and preloads once ready.
+                if (removed == false) ads.initialize()
             }
         }
         viewModelScope.launch {
@@ -169,6 +177,23 @@ class WhaaackViewModel(app: Application) : AndroidViewModel(app) {
                 val formatted = details?.oneTimePurchaseOfferDetails?.formattedPrice
                 _state.update { it.copy(removeAdsPrice = formatted) }
             }
+        }
+        // A pending purchase completes Play's sheet and grants nothing; without this the
+        // player is shown no acknowledgement at all and the Remove ads button is still there.
+        viewModelScope.launch {
+            billing.events.collect { event ->
+                val message = when (event) {
+                    is BillingManager.Event.PurchasePending ->
+                        "That purchase is still being confirmed by Google Play."
+                }
+                _state.update { it.copy(toast = message) }
+            }
+        }
+        // 3.16: Play's fraud detection correlates orders with in-app accounts through an
+        // opaque handle. Kept in step with the session rather than read at purchase time, so
+        // signing out cannot leave the previous player's id attached to the next order.
+        viewModelScope.launch {
+            auth.player.collect { billing.setAccount(it?.userId) }
         }
         billing.start()
 
@@ -227,17 +252,22 @@ class WhaaackViewModel(app: Application) : AndroidViewModel(app) {
             val personalBest = maxOf(prefs.localBestMillis, result.millisSurvived)
 
             var rank: Int? = null
-            var submitFailed = false
+            var submitError: String? = null
             // A run abandoned during the countdown scores zero; there is nothing to post.
             if (result.ranked && _state.value.signedIn && result.millisSurvived > 0L) {
-                val posted = runCatching {
-                    leaderboard.submit(result.millisSurvived, result.hits, result.topSpeedLevel)
-                }.getOrDefault(false)
-                if (posted) {
-                    rank = runCatching { leaderboard.myStanding(BoardScope.ALL_TIME)?.rank }
-                        .getOrNull()
-                } else {
-                    submitFailed = true
+                try {
+                    if (leaderboard.submit(result.millisSurvived, result.hits, result.topSpeedLevel)) {
+                        rank = runCatching { leaderboard.myStanding(BoardScope.ALL_TIME)?.rank }
+                            .getOrNull()
+                    }
+                } catch (e: SupabaseClient.SupabaseException) {
+                    // The server saw the score and said no — a plausibility constraint, the
+                    // rate-limit trigger, or a session that has gone stale. Telling the player
+                    // to check their connection would be actively misleading: the connection
+                    // is fine, and there is nothing for them to retry.
+                    submitError = "That run couldn't be recorded on the leaderboard."
+                } catch (e: java.io.IOException) {
+                    submitError = "Couldn't post that score — check your connection."
                 }
             }
 
@@ -257,10 +287,33 @@ class WhaaackViewModel(app: Application) : AndroidViewModel(app) {
                 ),
                 // Silently dropping a ranked score is the one failure a player would
                 // definitely want to know about.
-                toast = if (submitFailed) "Couldn't post that score — check your connection." else it.toast,
+                toast = submitError ?: it.toast,
             ) }
         }
     }
+
+    /**
+     * A run was suspended without finishing — backgrounded, or the window shrank below a
+     * playable size. The run itself is deliberately not resumable across process death: this
+     * is a session-length arcade game and restoring a half-finished reflex run would be worse
+     * than starting over. What is *not* acceptable is losing the score too, which is what
+     * happened while `recordLocalBest` was only reached from `onRunFinished` — a backgrounded
+     * process holding ~4.6 MB of bitmaps is a routine kill on a low-memory device.
+     *
+     * Ranked scores are not posted here: an interrupted run has not ended, and submitting it
+     * would put a partial run on the board and burn a rate-limit slot for a run the player is
+     * about to come back and finish.
+     */
+    fun onRunInterrupted(millisSurvived: Long) {
+        viewModelScope.launch { settings.recordLocalBest(millisSurvived) }
+    }
+
+    /**
+     * The End-run control was pressed once and is now waiting for a confirming press. Worth a
+     * sound: it is the only cue that the press registered but deliberately did not act, and
+     * silence there reads as an unresponsive button rather than a safety catch.
+     */
+    fun onQuitArmed() = audio.blip()
 
     fun onLose() = audio.lose()
 
@@ -291,7 +344,12 @@ class WhaaackViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun showPrivacyOptions(activity: Activity) {
-        consent.showPrivacyOptions(activity) { publishConsentState() }
+        consent.showPrivacyOptions(activity) {
+            // A player who declined at launch and accepts here would otherwise get no SDK
+            // initialisation until the next cold start.
+            if (consent.canRequestAds) ads.initialize()
+            publishConsentState()
+        }
     }
 
     // ---- remove ads ------------------------------------------------------------------
@@ -336,10 +394,20 @@ class WhaaackViewModel(app: Application) : AndroidViewModel(app) {
      */
     private fun publishConsentState() {
         _state.update { it.copy(
-            adsAvailable = consent.canRequestAds,
+            adsAvailable = adsAvailable(),
             privacyOptionsRequired = consent.isPrivacyOptionsRequired,
         ) }
     }
+
+    /**
+     * Whether an ad could actually play. Consent alone is not the answer: a player who bought
+     * the ad-free unlock and also consented would otherwise read "AD MAY PLAY BEFORE NEXT
+     * SCREEN" after every run, for ever, while no ad ever plays. Gated here rather than at
+     * the call site so no future caller repeats it — the same reasoning AdsManager applies to
+     * the ad gate itself.
+     */
+    private fun adsAvailable(): Boolean =
+        consent.canRequestAds && _state.value.adsRemoved == false
 
     // ---- settings ------------------------------------------------------------------
 
@@ -562,6 +630,7 @@ class WhaaackViewModel(app: Application) : AndroidViewModel(app) {
 
     override fun onCleared() {
         audio.release()
+        billing.close()
         // The bitmaps are deliberately not freed here: Compose still holds ImageBitmap
         // wrappers around them and disposes its composition when the window detaches, which
         // is after this runs. See GameAssets.

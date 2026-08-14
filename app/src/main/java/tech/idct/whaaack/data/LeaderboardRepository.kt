@@ -63,7 +63,18 @@ class LeaderboardRepository(private val client: SupabaseClient) {
         )
     }
 
-    /** Records a ranked run. No-ops when the player is not signed in. */
+    /**
+     * Records a ranked run.
+     *
+     * Returns false when there was nothing to attempt — no backend configured, or nobody
+     * signed in. **Throws** when an attempt was made and failed, because the caller has to be
+     * able to tell the two kinds of failure apart: a [SupabaseClient.SupabaseException] means
+     * the server looked at the score and refused it (a plausibility constraint, the rate-limit
+     * trigger, an expired session), while a plain IOException means the request never got
+     * there. Swallowing both into `false` is why every rejection used to be reported to the
+     * player as "check your connection", which is advice they cannot act on and which is
+     * wrong about the cause.
+     */
     suspend fun submit(millis: Long, hits: Int, topSpeed: Int): Boolean {
         if (!client.isConfigured) return false
         if (client.currentSession() == null) return false
@@ -72,15 +83,14 @@ class LeaderboardRepository(private val client: SupabaseClient) {
             put("hits", JsonPrimitive(hits))
             put("top_speed", JsonPrimitive(topSpeed))
         }
-        return runCatching {
-            client.request(
-                "POST",
-                "/rest/v1/scores",
-                payload,
-                authorized = true,
-                extraHeaders = mapOf("Prefer" to "return=minimal"),
-            )
-        }.isSuccess
+        client.request(
+            "POST",
+            "/rest/v1/scores",
+            payload,
+            authorized = true,
+            extraHeaders = mapOf("Prefer" to "return=minimal"),
+        )
+        return true
     }
 
     companion object {

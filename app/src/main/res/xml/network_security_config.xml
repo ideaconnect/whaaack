@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Cleartext is already refused by default at targetSdk 28 and above, so this file changes no
+  behaviour today. It is here to state the posture explicitly rather than inherit it from a
+  targetSdk that will be bumped by someone who is not thinking about TLS, and to give a
+  single obvious place to add a debug-only override if traffic ever has to be proxied.
+
+  Deliberately no certificate pinning: every request goes to a Supabase-hosted endpoint whose
+  certificate rotates on Supabase's schedule, and a pin that outlives its certificate takes
+  the whole backend down for every installed copy until they update.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

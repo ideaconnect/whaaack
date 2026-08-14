@@ -95,7 +95,7 @@ fun AuthScreen(
         if (!googleAvailable) {
             Spacer(Modifier.height(6.dp))
             Text(
-                "Google sign-in needs its OAuth client configured — see docs/SETUP.md.",
+                "Google sign-in isn't available right now — use email instead.",
                 color = Color(0x8AFFF3E6),
                 fontSize = 11.sp,
             )

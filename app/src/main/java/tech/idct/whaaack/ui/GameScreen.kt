@@ -31,6 +31,8 @@ fun GameScreen(
     onStrike: () -> Unit,
     onGameOver: (GameEngine.Result) -> Unit,
     onLose: () -> Unit,
+    onRunInterrupted: (Long) -> Unit,
+    onQuitArmed: () -> Unit,
 ) {
     val context = LocalContext.current
 
@@ -43,6 +45,8 @@ fun GameScreen(
         live.onStrike = onStrike
         live.onGameOver = onGameOver
         live.onLose = onLose
+        live.onRunInterrupted = onRunInterrupted
+        live.onQuitArmed = onQuitArmed
         live.haptics = hapticsEnabled
     }
 
@@ -93,6 +97,18 @@ fun GameScreen(
                         live.onStrike()
                         buzz(60, VibrationEffect.DEFAULT_AMPLITUDE)
                     }
+
+                    // Main thread. The run has not ended — this is only a chance to bank the
+                    // score before a backgrounded process is killed and takes it with it.
+                    override fun onRunInterrupted(millisSurvived: Long) {
+                        live.onRunInterrupted(millisSurvived)
+                    }
+
+                    // Main thread, straight from onTouchEvent.
+                    override fun onQuitArmed() {
+                        live.onQuitArmed()
+                        buzz(25, VibrationEffect.DEFAULT_AMPLITUDE)
+                    }
                 }
                 startRun(ranked)
             }
@@ -120,6 +136,12 @@ private class LiveCallbacks {
 
     @Volatile
     var onLose: () -> Unit = {}
+
+    @Volatile
+    var onRunInterrupted: (Long) -> Unit = {}
+
+    @Volatile
+    var onQuitArmed: () -> Unit = {}
 
     @Volatile
     var haptics: Boolean = true

@@ -20,14 +20,18 @@ import com.android.billingclient.api.queryProductDetails
 import com.android.billingclient.api.queryPurchasesAsync
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import tech.idct.whaaack.data.EntitlementStore
+import java.security.MessageDigest
 import kotlin.coroutines.resume
 
 /**
@@ -88,17 +92,40 @@ class BillingManager(
         data class Unknown(val responseCode: Int, val reason: String) : Check
     }
 
+    /** Something the player should be told about, arising outside a call they made. */
+    sealed interface Event {
+        /** Payment is not secured yet — cash, carrier billing or parental approval. */
+        data object PurchasePending : Event
+    }
+
     private val app = context.applicationContext
 
     private val purchasesListener = PurchasesUpdatedListener { result, purchases ->
         when (result.responseCode) {
             BillingClient.BillingResponseCode.OK ->
-                purchases.orEmpty().forEach { scope.launch { handlePurchase(it) } }
+                purchases.orEmpty().forEach { purchase ->
+                    // PENDING is the one outcome the sheet leaves entirely unexplained. Cash,
+                    // carrier billing and parental approval all complete Play's flow without
+                    // granting anything, and handlePurchase returns silently for any state
+                    // that is not PURCHASED — so the player pays, comes back, and finds the
+                    // Remove ads button exactly where they left it with no word about why.
+                    if (purchase.purchaseState == Purchase.PurchaseState.PENDING &&
+                        productId in purchase.products
+                    ) {
+                        _events.tryEmit(Event.PurchasePending)
+                    }
+                    scope.launch { handlePurchase(purchase) }
+                }
 
             // Google's own guidance: this is not an error, it is a cue to re-query. Showing
             // a failure here would strand a reinstalled paying player in front of the paywall.
             BillingClient.BillingResponseCode.ITEM_ALREADY_OWNED ->
-                scope.launch { refresh("already-owned") }
+                scope.launch {
+                    // This is a *recovery* path, so it must not be swallowed by the settle
+                    // window that exists to protect a fresh grant — clear it first.
+                    purchaseLaunchedAtMs = 0L
+                    refresh("already-owned")
+                }
 
             BillingClient.BillingResponseCode.USER_CANCELED -> Unit
 
@@ -129,14 +156,39 @@ class BillingManager(
     /** Formatted local price, or null when Play has nothing to sell (or has not answered). */
     val price: StateFlow<ProductDetails?> = _productDetails.asStateFlow()
 
-    private val _lastCheck = MutableStateFlow<Check?>(null)
-    val lastCheck: StateFlow<Check?> = _lastCheck.asStateFlow()
+    /**
+     * Replay-free so a rotation cannot re-toast, and buffered so an emit from the Play
+     * listener never has to suspend.
+     */
+    private val _events = MutableSharedFlow<Event>(extraBufferCapacity = 4)
+    val events: SharedFlow<Event> = _events.asSharedFlow()
 
     /** Every entitlement write goes through this, so passes cannot interleave. */
     private val gate = Mutex()
     private var passSeq = 0L
     private var lastGrantSeq = 0L
+
+    @Volatile
     private var purchaseLaunchedAtMs = 0L
+
+    /**
+     * Opaque, stable per-account handle for Play's fraud detection. Never the raw Supabase
+     * id and never an email — Google's own guidance is that this value must not identify the
+     * user to anyone reading an order.
+     */
+    @Volatile
+    private var obfuscatedAccountId: String? = null
+
+    /** Null when signed out; the Home upsell is offered to signed-out players too. */
+    fun setAccount(userId: String?) {
+        obfuscatedAccountId = userId?.takeIf { it.isNotBlank() }?.let { raw ->
+            MessageDigest.getInstance("SHA-256")
+                .digest(raw.toByteArray())
+                .joinToString("") { "%02x".format(it) }
+                // Play caps this at 64 characters, which a hex SHA-256 exactly fills.
+                .take(64)
+        }
+    }
 
     /** Reads the stored entitlement, then asks Play. The disk value is authoritative first. */
     fun start() {
@@ -219,12 +271,6 @@ class BillingManager(
     private suspend fun refresh(trigger: String): Check = gate.withLock {
         val seq = ++passSeq
 
-        // Returning from Play's sheet fires onResume before PurchasesUpdatedListener, so a
-        // pass started pre-purchase could otherwise land a negative on top of the grant.
-        if (SystemClock.elapsedRealtime() - purchaseLaunchedAtMs < PURCHASE_SETTLE_MS) {
-            return@withLock conclude(Check.Unknown(0, "purchase-in-flight"))
-        }
-
         val setup = connect()
         if (setup.responseCode != BillingClient.BillingResponseCode.OK) {
             return@withLock conclude(Check.Unknown(setup.responseCode, "setup"))
@@ -282,6 +328,21 @@ class BillingManager(
             return@withLock conclude(Check.NotOwned)
         }
 
+        // Returning from Play's sheet fires onResume before PurchasesUpdatedListener, so a
+        // pass that started pre-purchase could land a negative on top of a grant that is
+        // about to arrive. This guard belongs *here*, immediately before the only branch
+        // that can take something away — not at the top of the pass.
+        //
+        // It used to sit at the top, which made it swallow both recovery paths: a
+        // reinstalled owner who taps "Remove ads" gets ITEM_ALREADY_OWNED, whose whole job
+        // is to trigger a re-query, and that re-query returned "purchase-in-flight" without
+        // asking Play anything; and "Restore purchases" answered "Couldn't reach Google
+        // Play — nothing has changed" for a minute after any cancelled sheet, while Play was
+        // perfectly reachable. A pass that can only ever *grant* must never be suppressed.
+        if (SystemClock.elapsedRealtime() - purchaseLaunchedAtMs < PURCHASE_SETTLE_MS) {
+            return@withLock conclude(Check.Unknown(0, "purchase-in-flight"))
+        }
+
         // Verified online, Play said OK, the product is genuinely absent, and we currently
         // grant it. This is either a refund-and-revoke or a device that never owned it.
         // Confirm once more before taking anything away.
@@ -297,7 +358,6 @@ class BillingManager(
     private suspend fun conclude(check: Check): Check {
         val code = (check as? Check.Unknown)?.responseCode ?: BillingClient.BillingResponseCode.OK
         store.recordCheck(System.currentTimeMillis(), code)
-        _lastCheck.value = check
         if (check is Check.Unknown) Log.i(TAG, "entitlement unresolved: ${check.reason} (${check.responseCode})")
         return check
     }
@@ -348,9 +408,6 @@ class BillingManager(
 
     // ---- purchase ------------------------------------------------------------------
 
-    /** True when Play has something to sell — i.e. the product exists and is purchasable. */
-    fun isPurchasable(): Boolean = _productDetails.value != null && _adsRemoved.value != true
-
     /**
      * Opens Play's purchase sheet. Returns the response code, or OK when the sheet opened;
      * the outcome itself arrives through [purchasesListener].
@@ -365,6 +422,7 @@ class BillingManager(
                         .build(),
                 ),
             )
+            .apply { obfuscatedAccountId?.let { setObfuscatedAccountId(it) } }
             .build()
         purchaseLaunchedAtMs = SystemClock.elapsedRealtime()
         return client.launchBillingFlow(activity, params).responseCode
@@ -373,6 +431,15 @@ class BillingManager(
     /** Manual "restore purchases", for a player who reinstalled or changed device. */
     fun restore(onDone: (Check) -> Unit = {}) {
         scope.launch { onDone(refresh("restore")) }
+    }
+
+    /**
+     * Releases the bound connection to the Play Store. The client holds applicationContext,
+     * so this is hygiene rather than a leak — but a ServiceConnection left behind by every
+     * ViewModel that ever existed is still a ServiceConnection left behind.
+     */
+    fun close() {
+        runCatching { client.endConnection() }
     }
 
     private companion object {

@@ -36,6 +36,17 @@ class SupabaseClient(
     private val http = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(20, TimeUnit.SECONDS)
+        .writeTimeout(15, TimeUnit.SECONDS)
+        // The one that actually bounds the wait. connect/read/write are each per-socket-op,
+        // so a trickling connection or a captive portal that answers a byte at a time can
+        // keep a single call alive indefinitely without ever tripping them — and the sign-in
+        // button sits on "Working…" for as long as that lasts, with no cancel affordance and
+        // no way out but the back gesture, which navigates away while the call is still in
+        // flight. callTimeout bounds a whole call — DNS, connect, TLS, write, read and any
+        // redirects — so no single request can outlive it. It expires as an
+        // InterruptedIOException, which AuthRepository already maps to AuthError.Offline.
+        // (Each attempt gets its own budget, so a 401 refresh-and-retry can take 2x this.)
+        .callTimeout(30, TimeUnit.SECONDS)
         .build()
 
     val json = Json {

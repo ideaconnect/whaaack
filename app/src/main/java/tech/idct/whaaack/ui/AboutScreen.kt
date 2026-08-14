@@ -29,6 +29,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.net.toUri
+import tech.idct.whaaack.BuildConfig
 import tech.idct.whaaack.R
 import tech.idct.whaaack.ui.theme.AccentLight
 import tech.idct.whaaack.ui.theme.Cream
@@ -101,7 +102,12 @@ fun AboutScreen(onBack: () -> Unit) {
                 )
                 Text("Whaaack!", color = Cream, fontSize = 28.sp, fontWeight = FontWeight.Black)
                 Text(
-                    "Version 1.0 · built by IDCT",
+                    // Read from the build, not typed twice: bumping versionName in Gradle
+                    // used to leave both this and the Settings footer still claiming 1.0,
+                    // and with no crash reporter the version a player reads off this screen
+                    // is the only way to know which build a bug report came from. The code
+                    // is what Play Console and Android vitals key on, so show that too.
+                    "Version ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE}) · built by IDCT",
                     color = Color(0xB8FFF3E6),
                     fontSize = 12.sp,
                 )

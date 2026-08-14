@@ -4,7 +4,7 @@ import android.content.Intent
 import android.os.Bundle
 import android.util.Log
 import androidx.activity.ComponentActivity
-import androidx.activity.compose.BackHandler
+import androidx.activity.compose.PredictiveBackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
@@ -40,6 +40,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
 import com.google.android.libraries.identity.googleid.GetGoogleIdOption
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import tech.idct.whaaack.audio.AudioEngine
 import tech.idct.whaaack.data.BoardScope
@@ -175,7 +176,19 @@ private fun WhaaackApp(vm: WhaaackViewModel, onGoogleSignIn: () -> Unit) {
     val activity = remember(context) { context as? android.app.Activity }
     val googleAvailable = remember { BuildConfig.GOOGLE_WEB_CLIENT_ID.isNotBlank() }
 
-    BackHandler(enabled = state.screen != Screen.HOME) { vm.onBack() }
+    // PredictiveBackHandler rather than BackHandler: with targetSdk 36 predictive back is on
+    // and cannot meaningfully be opted out of, and a plain BackHandler simply swallows the
+    // gesture — so on every screen except Home the system had no preview to draw and the
+    // transition was instant. Consuming the progress flow is what lets the platform animate;
+    // the navigation itself still happens once, on completion.
+    PredictiveBackHandler(enabled = state.screen != Screen.HOME) { progress ->
+        try {
+            progress.collect { /* the platform draws the preview; nothing to do per event */ }
+            vm.onBack()
+        } catch (_: CancellationException) {
+            // Gesture abandoned mid-swipe. Staying put is the whole point of the preview.
+        }
+    }
 
     // Above the branch below, which returns early for the game screen: this is the one place
     // the music track is chosen, so it has to be reached whatever is on screen.
@@ -202,6 +215,8 @@ private fun WhaaackApp(vm: WhaaackViewModel, onGoogleSignIn: () -> Unit) {
                 onStrike = { vm.onStrikeFeedback() },
                 onGameOver = { vm.onRunFinished(it) },
                 onLose = { vm.onLose() },
+                onRunInterrupted = { vm.onRunInterrupted(it) },
+                onQuitArmed = { vm.onQuitArmed() },
             )
         }
         return
