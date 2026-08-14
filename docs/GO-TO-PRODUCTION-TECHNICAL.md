@@ -589,6 +589,18 @@ reasoning survives.
   to `grant_type=id_token`, which now answers *"Bad ID token"* rather than *"Unsupported
   provider"* — the provider is enabled and reading the token, so both client ids landed.
 
+  **Everything else was checked and is ready** — so the consent screen really is the only
+  blocker left on this path. Verified: the Android client (`…o3srji4j…`) carries no secret and
+  the web client (`…aaiu8iv8…`) does, which is the right way round; Supabase holds both, since
+  `grant_type=id_token` answers *"Bad ID token"* rather than *"Unsupported provider"*; and this
+  machine's debug SHA-1 is `A8:87:91:6F:1B:42:11:BA:82:4F:C8:5B:0A:8A:83:DC:BD:9B:07:EB`,
+  matching what §3 of [SETUP.md](SETUP.md) records — so debug sign-in on this machine should
+  start working the moment the screen is published, with no further wiring.
+
+  Publishing is not scriptable. It is not exposed by `gcloud` (which is not installed here
+  anyway) — the Testing → In production switch is a Console-only action, so this one cannot be
+  automated and has to be clicked.
+
   **What remains is the consent screen, and it is the part that actually gates sign-in.** While
   it sits in **Testing**, only accounts explicitly listed as test users can complete a sign-in,
   so Google sign-in is enabled and still unusable for everyone else. Publishing it to Production
