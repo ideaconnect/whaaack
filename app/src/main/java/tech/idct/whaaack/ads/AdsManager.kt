@@ -11,6 +11,7 @@ import com.google.android.gms.ads.AdRequest
 import com.google.android.gms.ads.FullScreenContentCallback
 import com.google.android.gms.ads.LoadAdError
 import com.google.android.gms.ads.MobileAds
+import com.google.android.gms.ads.RequestConfiguration
 import com.google.android.gms.ads.interstitial.InterstitialAd
 import com.google.android.gms.ads.interstitial.InterstitialAdLoadCallback
 import java.util.concurrent.atomic.AtomicBoolean
@@ -38,6 +39,38 @@ class AdsManager(
     private val app = context.applicationContext
     private val initialised = AtomicBoolean(false)
     private val main = Handler(Looper.getMainLooper())
+
+    init {
+        // Ceiling on what an ad may contain. Left unset, it is UNSPECIFIED and AdMob may fill
+        // this game with anything up to MA — gambling, dating, alcohol — inside a cartoon
+        // orchard that will carry an Everyone / PEGI 3 content rating. Google Play's Ads
+        // policy requires ads to be appropriate to the rating the app declares, so a mismatch
+        // here is a policy exposure rather than a matter of taste.
+        //
+        // Set in the constructor rather than inside initialize(): the merged manifest declares
+        // MobileAdsInitProvider, so the SDK can already be up before anything in this class
+        // runs, and this has to be in force before the first request goes out — not before
+        // initialisation, which is a different moment. AdsManager is built on the main thread
+        // with the ViewModel, well ahead of any load.
+        //
+        // Built from the existing configuration rather than a fresh Builder, so this cannot
+        // silently clear something set elsewhere — test device ids being the obvious one.
+        //
+        // This is only half the control. The same ceiling has to be set in AdMob → Blocking
+        // controls, because the console can serve a rating this never asked for and a rebuild
+        // can override what the console says; whichever is stricter wins, and the two drifting
+        // apart is how a family-friendly game ends up with a dating ad in it. Keep this, the
+        // console, and the IARC questionnaire answers in step — G narrows the demand pool and
+        // costs some eCPM, which is the deliberate price of not gambling the rating.
+        runCatching {
+            MobileAds.setRequestConfiguration(
+                MobileAds.getRequestConfiguration()
+                    .toBuilder()
+                    .setMaxAdContentRating(MAX_AD_CONTENT_RATING)
+                    .build(),
+            )
+        }
+    }
 
     // Main thread only — see the note on preload(). No synchronisation needed because
     // nothing else ever touches them.
@@ -178,6 +211,13 @@ class AdsManager(
 
     private companion object {
         const val TAG = "AdsManager"
+
+        /**
+         * G — general audiences. Matches the Everyone / PEGI 3 rating this game expects and
+         * the 13+ target audience declared on Play. Change it here *and* in AdMob → Blocking
+         * controls together, and only if the IARC answers change to justify it.
+         */
+        const val MAX_AD_CONTENT_RATING = RequestConfiguration.MAX_AD_CONTENT_RATING_G
 
         /**
          * Shortest gap between two ads the player is actually shown. A run lasts well under
