@@ -576,13 +576,24 @@ reasoning survives.
   `pass = "env(RESEND_API_KEY)"`, so a push with that variable unset writes the literal string
   `env(RESEND_API_KEY)` over the password that was just fixed.
 
-- [ ] **Push the Google provider and publish the OAuth consent screen to Production** 🔴
+- [ ] **Publish the OAuth consent screen to Production** — **the provider is pushed; the consent screen is not** 🔴
   `[auth.external.google] enabled = true` is set locally; the remote does not have it. Run, with
   all three exported in one shell:
   `GOOGLE_CLIENT_ID="<web>,<android>" GOOGLE_CLIENT_SECRET="<web secret>" RESEND_API_KEY="<key>"
   supabase config push`. Any omitted `env(...)` is pushed as its literal text, which is why the
   Resend key must be present even though it looks unrelated — **and SMTP is working now, so this
-  push is the single most likely way to break it again.** Take the key from `secrets/resend.txt`,
+  push is the single most likely way to break it again.**
+
+  **The push half is done.** It rode along with the `secure_password_change` change, because a
+  push sends the whole auth config; verified from outside by posting a deliberately bogus token
+  to `grant_type=id_token`, which now answers *"Bad ID token"* rather than *"Unsupported
+  provider"* — the provider is enabled and reading the token, so both client ids landed.
+
+  **What remains is the consent screen, and it is the part that actually gates sign-in.** While
+  it sits in **Testing**, only accounts explicitly listed as test users can complete a sign-in,
+  so Google sign-in is enabled and still unusable for everyone else. Publishing it to Production
+  needs no verification review — the flow requests only `openid`/`email`/`profile`. The Play App
+  Signing SHA-1 (§2) is the other half of making this work on an installed build. Take the key from `secrets/resend.txt`,
   and re-run the signup check from the SMTP item straight afterwards to prove it survived.
   Then publish the consent screen in
   Google Cloud → APIs & Services: while it is in **Testing**, only explicitly listed test accounts
@@ -646,7 +657,7 @@ reasoning survives.
   colliding signups produced `Collide`, `Collide 2`, `Collide 3` — the retry path that used to
   throw 23505. All test rows were removed afterwards; the database is unchanged.
 
-- [x] **Trace the forgot-password flow end to end, and settle `secure_password_change`** — **traced and settled; one config push left**
+- [x] **Trace the forgot-password flow end to end, and settle `secure_password_change`** — **done, pushed and verified live**
   Nobody has followed the whole path. `sendPasswordReset` posts `/auth/v1/recover?redirect_to=
   whaaack://auth`; the deep link resolves the user, saves the session, and for `type == "recovery"`
   navigates to Settings telling the player to set a new password there; Settings then calls
@@ -716,6 +727,20 @@ reasoning survives.
   preview it: every `env(...)` must be exported in that same shell or it is written through as
   the literal string, and that includes `RESEND_API_KEY` — which would replace the SMTP
   password that is currently working.
+
+  **Pushed, with all three variables exported, and verified end to end.** The CLI reported one
+  changed line — `secure_password_change` true → false — and `auth: updated`. Then the two
+  things that could have gone wrong were checked rather than assumed:
+
+  - **SMTP survived.** `POST /auth/v1/recover` still answers 200 in 1.7s, which is a real
+    round trip to `smtp.resend.com` and not a local failure. This was the genuine risk: a push
+    rewrites `smtp_pass` from `env(RESEND_API_KEY)`, so an unset variable would have written
+    the literal string and killed auth email again.
+  - **The fix is live.** The same test that produced HTTP 400 `reauthentication_needed` before
+    — sign in, age the session to three days in `auth.sessions`, change the password — now
+    returns **HTTP 200**. A returning player can change their password.
+
+  Test accounts removed afterwards; the project is back to its two real users.
 
 - [ ] **Move to a paid Supabase plan** 🔴
   The project (`pklrfcbyseitdbxkmsnw`, Postgres 17.6, aws-1-eu-west-1 — good, the data stays in the
