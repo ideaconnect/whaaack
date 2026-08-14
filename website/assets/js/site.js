@@ -77,6 +77,64 @@
     });
   }
 
+  // ---- contact form -----------------------------------------------------------------
+  // The form is a plain POST so that it still works with JS off. The cost of that is the
+  // failure path: the browser follows the POST to api.web3forms.com and renders whatever
+  // comes back, which for a missing or rejected captcha is raw JSON — no styling, no way
+  // back, on the page that is the only out-of-app route for a GDPR or deletion request.
+  //
+  // So when JS is available (which it must be for the captcha to have rendered at all) the
+  // submit is intercepted and the same request is made in the background, leaving the
+  // browser on this page whatever happens. With JS off, nothing here runs and the native
+  // POST behaves exactly as before.
+  var form = document.querySelector('.contact-form');
+  if (form && window.fetch && window.FormData) {
+    var errorBox = form.querySelector('[data-form-error]');
+    var submit = form.querySelector('button[type="submit"]');
+    var submitLabel = submit ? submit.textContent : '';
+
+    var fail = function (message) {
+      if (!errorBox) return;
+      errorBox.textContent = message;
+      errorBox.hidden = false;
+      if (submit) { submit.disabled = false; submit.textContent = submitLabel; }
+    };
+
+    form.addEventListener('submit', function (event) {
+      event.preventDefault();
+      if (errorBox) errorBox.hidden = true;
+      if (submit) { submit.disabled = true; submit.textContent = 'Sending…'; }
+
+      var data = new FormData(form);
+      var redirect = data.get('redirect');
+      // Sent as JSON: Web3Forms answers a form-encoded POST with a redirect we would have to
+      // follow, and answers a JSON one with a body we can actually read and report.
+      data.delete('redirect');
+      var payload = {};
+      data.forEach(function (value, key) { payload[key] = value; });
+
+      fetch(form.action, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+        body: JSON.stringify(payload)
+      }).then(function (response) {
+        return response.json().catch(function () { return {}; });
+      }).then(function (body) {
+        if (body && body.success) {
+          window.location.assign(redirect || '/whaaack/contact/thanks/');
+          return;
+        }
+        fail(
+          (body && body.message)
+            ? body.message
+            : 'That did not send. Please check the captcha and try again.'
+        );
+      }).catch(function () {
+        fail('That did not send — the connection failed. Please try again.');
+      });
+    });
+  }
+
   // ---- current year ---------------------------------------------------------------
   var year = document.querySelector('[data-year]');
   if (year) year.textContent = new Date().getFullYear();

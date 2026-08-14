@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Published at https://idct.tech/whaaack/sitemap.xml and referenced from the
+  sitemap index at https://idct.tech/sitemap.xml (repo: ideaconnect.github.io).
+  Add an entry here whenever a page is added to website/.
+
+  These five URLs match the <link rel="canonical"> on each page, and the CI job
+  asserts that they still do. GitHub Pages also answers /whaaack/privacy and
+  /whaaack/index.html, so the canonical tags are what keep those extra spellings
+  from being indexed separately.
+
+  Deliberately absent: /whaaack/contact/thanks/, which is noindex — it is a
+  destination you only reach by submitting the form, and it says nothing on its
+  own. 404.html is absent for the same reason and is noindex too.
+
+  <changefreq>/<priority> are omitted on purpose — Google ignores both.
+-->
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url>
+    <loc>https://idct.tech/whaaack/</loc>
+  </url>
+  <url>
+    <loc>https://idct.tech/whaaack/privacy/</loc>
+  </url>
+  <url>
+    <loc>https://idct.tech/whaaack/terms/</loc>
+  </url>
+  <url>
+    <loc>https://idct.tech/whaaack/delete-account/</loc>
+  </url>
+  <url>
+    <loc>https://idct.tech/whaaack/contact/</loc>
+  </url>
+</urlset>

@@ -80,9 +80,30 @@ app/src/main/java/tech/idct/whaaack/
 supabase/
   migrations/   schema, RLS, leaderboard functions
   config.toml   remote auth settings
+website/        the project site, published to idct.tech/whaaack/
 tools/          launcher-icon generator (Pillow + numpy)
 docs/SETUP.md   credentials, Google OAuth, AdMob consent, release checklist
+docs/GO-TO-PRODUCTION-TECHNICAL.md      what is left in the repo before release
+docs/GO-TO-PRODUCTION-NON-TECHNICAL.md  what is left in a console or a contract
 ```
+
+## The website
+
+[idct.tech/whaaack/](https://idct.tech/whaaack/) — the landing page plus the privacy policy,
+terms, account-deletion page and contact form. Plain static HTML, no framework and no build
+step, in [website/](website/).
+
+It is a GitHub Pages **project** page served under the org's apex domain, which is the one
+thing worth knowing before editing it: the site must never ship a `CNAME` (that would claim
+`idct.tech` at its root and collide with the org page that owns it), and `app-ads.txt` cannot
+live here either — AdMob reads it from the domain root, so it belongs to the apex repo.
+
+[.github/workflows/pages.yml](.github/workflows/pages.yml) deploys it and refuses to publish a
+tree that would break quietly: the legal pages must exist (Play requires a reachable policy URL
+and the app deep-links it), each page's canonical must match its own path, the sitemap must list
+exactly those canonicals, every in-page anchor must resolve, and no cleartext URL or undeclared
+third-party host may appear — that last one exists because a script tag is a recipient of the
+visitor's data and has to be named in the privacy policy.
 
 ## Building
 

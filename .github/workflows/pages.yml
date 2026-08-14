@@ -57,6 +57,8 @@ jobs:
             website/delete-account/index.html \
             website/contact/index.html \
             website/contact/thanks/index.html \
+            website/404.html \
+            website/sitemap.xml \
             website/assets/css/site.css \
             website/assets/js/site.js
           do
@@ -72,6 +74,123 @@ jobs:
         run: |
           grep -q 'value="https://idct.tech/whaaack/contact/thanks/"' website/contact/index.html \
             || { echo "::error::contact form redirect does not point at /whaaack/contact/thanks/"; exit 1; }
+
+      # Each page must point its canonical at its own URL. These <head> blocks were written
+      # by copying the previous page's, which is exactly how two pages end up claiming one
+      # canonical — and the loser then drops out of the index with no error anywhere.
+      - name: Verify each canonical matches its own path
+        run: |
+          fail=0
+          check() {
+            grep -q "<link rel=\"canonical\" href=\"$2\">" "$1" \
+              || { echo "::error file=$1::canonical is not $2"; fail=1; }
+          }
+          check website/index.html                https://idct.tech/whaaack/
+          check website/privacy/index.html        https://idct.tech/whaaack/privacy/
+          check website/terms/index.html          https://idct.tech/whaaack/terms/
+          check website/delete-account/index.html https://idct.tech/whaaack/delete-account/
+          check website/contact/index.html        https://idct.tech/whaaack/contact/
+          exit $fail
+
+      # The sitemap has to list exactly the canonical pages. A page added to the site and
+      # forgotten here is invisible to search; a page removed and left here is a 404 served
+      # to a crawler. Neither surfaces anywhere else.
+      - name: Verify the sitemap matches the canonical pages
+        run: |
+          python3 - <<'EOF'
+          import re, sys, xml.etree.ElementTree as ET
+          NS = "{http://www.sitemaps.org/schemas/sitemap/0.9}"
+          listed = {e.text.strip() for e in ET.parse("website/sitemap.xml").getroot().iter(NS + "loc")}
+          pages = ["website/index.html", "website/privacy/index.html", "website/terms/index.html",
+                   "website/delete-account/index.html", "website/contact/index.html"]
+          canon = set()
+          for page in pages:
+              m = re.search(r'<link rel="canonical" href="([^"]+)"', open(page, encoding="utf-8").read())
+              if m:
+                  canon.add(m.group(1))
+          missing, extra = canon - listed, listed - canon
+          for u in sorted(missing):
+              print(f"::error::sitemap.xml is missing {u}")
+          for u in sorted(extra):
+              print(f"::error::sitemap.xml lists {u}, which no page claims as its canonical")
+          sys.exit(1 if (missing or extra) else 0)
+          EOF
+
+      # In-page anchors are checked by nothing else, and a renamed heading id fails silently:
+      # the link still resolves, it just scrolls nowhere. The cross-page ones (privacy ->
+      # /whaaack/#adfree) are the easiest to break and the least likely to be noticed.
+      - name: Verify every in-page anchor resolves
+        run: |
+          python3 - <<'EOF'
+          import re, glob, sys, os
+          def url_of(path):
+              rel = os.path.relpath(path, "website").replace(os.sep, "/")
+              return "/whaaack/" + rel.replace("index.html", "")
+          ids = {}
+          for path in glob.glob("website/**/*.html", recursive=True):
+              html = open(path, encoding="utf-8").read()
+              ids[url_of(path)] = set(re.findall(r'\sid="([^"]+)"', html))
+          fail = 0
+          for path in glob.glob("website/**/*.html", recursive=True):
+              html = open(path, encoding="utf-8").read()
+              here = url_of(path)
+              for href in re.findall(r'href="([^"]*#[^"]+)"', html):
+                  page, frag = href.split("#", 1)
+                  target = here if page == "" else page
+                  if not target.startswith("/whaaack/"):
+                      continue
+                  if target not in ids:
+                      print(f"::error file={path}::{href} points at a page that does not exist")
+                      fail = 1
+                  elif frag not in ids[target]:
+                      print(f"::error file={path}::{href} has no matching id on {target}")
+                      fail = 1
+          sys.exit(fail)
+          EOF
+
+      # Two things that must never appear in this tree: a cleartext http:// URL, and a
+      # third-party host nobody declared.
+      #
+      # Only two hosts are actually *loaded* from — idct.tech and js.hcaptcha.com — and one
+      # more receives data on submit (api.web3forms.com). Those three are recipients of a
+      # visitor's data and every one of them has to appear in the privacy policy's recipients
+      # list; js.hcaptcha.com sat there undisclosed for exactly as long as nothing checked.
+      # The rest of the allow-list is plain outbound links, which send nothing — they are
+      # listed anyway because a *new* host appearing is worth one deliberate look either way,
+      # and because a resource load and a link are one attribute apart.
+      #
+      # play.google.com is pre-approved: the store badge is scheduled to land here at launch,
+      # and a red CI run on that edit would be noise rather than signal.
+      - name: Verify no cleartext URLs and no undeclared third-party hosts
+        run: |
+          set -u
+          if grep -rn 'http://' website/ --include=*.html --include=*.css --include=*.js | grep -v 'w3.org' | grep -v 'sitemaps.org'; then
+            echo "::error::cleartext http:// URL in website/"
+            exit 1
+          fi
+          grep -rhoE 'https://[a-zA-Z0-9.-]+' website/ --include=*.html --include=*.css --include=*.js | sed 's|https://||' | sort -u > hosts.txt
+          cat > allowed.txt <<'HOSTS'
+          idct.tech
+          api.web3forms.com
+          js.hcaptcha.com
+          github.com
+          play.google.com
+          support.google.com
+          policies.google.com
+          uodo.gov.pl
+          uokik.gov.pl
+          HOSTS
+          sed -i 's/^ *//' allowed.txt
+          # grep -vxF, not comm: comm requires both inputs sorted in the same collation and
+          # silently misreports when they are not — it warned "file 2 is not in sorted order"
+          # and still exited 0, which is a guard that passes for the wrong reason.
+          undeclared=$(grep -vxF -f allowed.txt hosts.txt || true)
+          rm -f hosts.txt allowed.txt
+          if [ -n "$undeclared" ]; then
+            echo "::error::undeclared third-party host(s): $undeclared"
+            echo "Add it to the allow-list in this step AND to the recipients list in the privacy policy."
+            exit 1
+          fi
 
       # A project page under the org's apex domain must NOT ship a CNAME: one would
       # claim idct.tech at its root and collide with the org page that owns it.

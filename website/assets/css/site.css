@@ -307,7 +307,30 @@ p { margin: 0 0 1em; }
   font: inherit;
   font-size: .96rem;
 }
-.field input:focus, .field textarea:focus { outline: 0; border-color: var(--accent); }
+/*
+  Keyboard focus.
+
+  The rule below used to be `outline: 0` with the ring replaced by a 1px border tint, and it
+  was the only focus styling on the site apart from the skip link — so every nav link, footer
+  link, button and the submit control had no visible focus indicator at all. That is a WCAG
+  2.4.7 failure outright, and the 1px swap on the inputs additionally failed 2.4.11, which
+  wants the indicator to be distinguishable from the unfocused state by more than a hairline.
+
+  :focus-visible rather than :focus, so a mouse click on a button does not leave a ring behind
+  it — the indicator appears for keyboard and switch navigation, which is who needs it.
+*/
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+.field input:focus-visible, .field textarea:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.field input:focus, .field textarea:focus { border-color: var(--accent); }
 .field textarea { resize: vertical; }
 .h-captcha { margin-bottom: 18px; }
 
@@ -333,3 +356,22 @@ p { margin: 0 0 1em; }
   padding: 10px 16px; border-radius: 0 0 12px 0; font-weight: 800; z-index: 100;
 }
 .skip-link:focus { left: 0; top: 0; }
+
+/* Contact form: the captcha's own label, and where a rejected submit reports itself. */
+.captcha-label {
+  display: block;
+  margin-bottom: 8px;
+  font-size: .82rem;
+  font-weight: 700;
+  color: var(--cream-dim);
+}
+
+.form-error {
+  margin: 0 0 14px;
+  padding: 12px 14px;
+  border: 1px solid rgba(242, 112, 79, .55);
+  border-radius: 12px;
+  background: rgba(242, 112, 79, .12);
+  color: var(--cream);
+  font-size: .9rem;
+}

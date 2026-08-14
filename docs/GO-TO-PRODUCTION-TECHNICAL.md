@@ -920,7 +920,7 @@ The console side of both — ad unit types, COPPA flags, creating the product �
 The *content* of the legal pages is in the [non-technical plan](GO-TO-PRODUCTION-NON-TECHNICAL.md);
 these are the structural and delivery problems in `website/` and `.github/workflows/pages.yml`.
 
-- [ ] **Verify the contact form end to end — it is the sole out-of-app rights channel** 🔴
+- [ ] **Verify the contact form end to end** — **tested: the captcha is NOT enforced; one dashboard toggle left** 🔴
   The form posts natively to Web3Forms with a honeypot and an hCaptcha widget, and the redirect is
   asserted in CI. But the sitekey is Web3Forms' **shared free-plan** hCaptcha key, and Web3Forms
   only validates the token server-side if hCaptcha is switched on for this form in their dashboard
@@ -931,14 +931,44 @@ these are the structural and delivery problems in `website/` and `.github/workfl
   monitored mailbox and that the mail is not being spam-filtered — a silently dead form means
   Play's data-deletion URL does not work. Test both the happy path and a bare `curl` POST.
 
-- [ ] **Add a branded 404 page** 🟡
+  **Tested, and the suspicion was right: hCaptcha is not enforced.** A bare POST from this
+  machine was refused, but not for the reason that matters — Web3Forms rejects server-shaped
+  calls on the free plan (*"Use our API in client side"*), which is a weak heuristic, not a
+  captcha check. Repeating it with browser-shaped headers (`Origin`, `Referer`, an ordinary
+  user-agent) and **no captcha token at all** was **accepted**: Web3Forms answered 303 to
+  `/whaaack/contact/thanks/`, which is its success path. So the widget on the page is
+  decoration, and the form — the only out-of-app route for a GDPR or deletion request, and the
+  address Play will check — takes scripted submissions from anything shaped like a browser.
+
+  **Remaining, and only you can do it: switch hCaptcha on for this form in the Web3Forms
+  dashboard**, then repeat the same browser-shaped POST and confirm it is refused. Two test
+  messages from this check are in the inbox; both say so in the subject line. While there,
+  confirm the access key still routes to a mailbox somebody reads and that Web3Forms mail is not
+  being spam-filtered — a silently dead form fails Play's data-deletion requirement without ever
+  announcing itself.
+
+  **Done here:** the page no longer dead-ends on failure. It keeps a native POST so it still
+  works with JS off, and the cost of that was the error path — the browser followed the POST to
+  `api.web3forms.com` and rendered raw JSON, unstyled, with no way back, on the page somebody
+  reaches when they want their data deleted. When JS is available (which it must be for the
+  captcha to have rendered at all) the submit is intercepted, the same request made in the
+  background, and failures reported inline; the browser never leaves the page. The captcha
+  container also has a real label now instead of being an unlabelled box.
+
+- [x] **Add a branded 404 page** — **done**
   There is no `website/404.html`; `https://idct.tech/whaaack/anything` returns GitHub's generic
   "Page not found" with no site chrome and no way back. The mechanism is already proven on this
   domain by sibling projects. Use the same header/footer/orchard chrome with **absolute** asset
   paths (`/whaaack/assets/…`), because the page is served for URLs at any depth and relative paths
   will 404 at every level but one. Add it to the required-files loop in `pages.yml`.
 
-- [ ] **Publish `website/sitemap.xml` and register it in the apex index** 🟡
+  **Done.** `website/404.html`, same chrome, every path absolute. The premise was checked rather
+  than trusted: `/chromis/nope` returns GitHub's generic page, which made the claim look shaky —
+  but `/helena/`, `/nuts/` and `/gentastic/` all return branded 404s, confirming a project-level
+  `404.html` really is served for arbitrary depths under the path prefix. Marked `noindex`, and
+  added to the required-files check.
+
+- [x] **Publish `website/sitemap.xml`** — **done; the apex index entry is one line in another repo**
   The apex already has the machinery — `robots.txt` points at a sitemap **index** aggregating one
   per subsite — and it lists helena, gentastic, chromis and nuts, but **not whaaack**;
   `/whaaack/sitemap.xml` is a 404. Every page already carries a correct canonical and the thanks
@@ -946,7 +976,18 @@ these are the structural and delivery problems in `website/` and `.github/workfl
   `<sitemap>` entry plus the subsites data entry in the `ideaconnect.github.io` repo, and add the
   file to the workflow's required list.
 
-- [ ] **Restore visible keyboard focus on the site** 🟡
+  **Done here:** `website/sitemap.xml` listing the five canonical URLs, following the sibling
+  convention (`/chromis/sitemap.xml`) down to the explanatory header. `contact/thanks/` and
+  `404.html` are deliberately absent — both are `noindex` and neither means anything on its own.
+  CI now asserts the sitemap lists exactly the set of canonicals, so a page added to the site and
+  forgotten here fails the build instead of quietly never being indexed.
+
+  **Remaining, in `ideaconnect.github.io`:** add
+  `<sitemap><loc>https://idct.tech/whaaack/sitemap.xml</loc></sitemap>` to the index and the
+  project entry to `_data/subsites.yml`. Confirmed today that the index still lists only helena,
+  gentastic, chromis and nuts.
+
+- [x] **Restore visible keyboard focus on the site** — **done**
   `site.css` sets `.field input:focus { outline: 0 }` and replaces the ring with a 1px border tint,
   and the only other focus rule in 335 lines is `.skip-link:focus`. Keyboard and switch users get
   **no visible focus indicator** on any nav link, footer link, button or the submit control — a
@@ -955,7 +996,13 @@ these are the structural and delivery problems in `website/` and `.github/workfl
   on the inputs. While there, label the hCaptcha container and make a rejected submit communicate
   something other than raw JSON.
 
-- [ ] **Page metadata and asset weight** ⚪
+  **Done.** A global `:focus-visible` ring in the accent colour, plus a real ring on the form
+  inputs in place of the 1px border tint. `:focus-visible` rather than `:focus`, so a mouse click
+  does not leave a ring behind it — the indicator is for keyboard and switch users, who are
+  exactly who it was missing for. The captcha label and the submit-failure handling are covered
+  in the contact-form item above.
+
+- [x] **Page metadata and asset weight** — **done**
   Privacy, terms, delete-account and contact have no OpenGraph tags, so sharing a legal link in a
   chat renders as a bare URL. Every page loads the 165 KB `whaaack-512.png` as both favicon and the
   30px header logo — ship a 32px PNG and an `.ico` for the tab and a ~64px logo for the header.
@@ -963,7 +1010,16 @@ these are the structural and delivery problems in `website/` and `.github/workfl
   the `#shots` images. And `website/assets/img/bg/splat{03,11,19,27}.png` are referenced by no CSS,
   JS or HTML — delete them.
 
-- [ ] **Extend the Pages workflow to guard the new invariants** ⚪
+  **Done, all four parts.** OpenGraph and Twitter tags on privacy, terms, delete-account and
+  contact, so a legal link pasted into a chat or a ticket renders as a card rather than a bare
+  URL. The 165 KB 512px PNG was serving as both the tab icon and a 30px header logo on every
+  page; it is now a 1.9 KB 32px PNG plus a 6 KB `.ico` for the tab, and a 5.7 KB 64px PNG for the
+  logo (64 so it still holds up at 2x), with the 512 kept only for `apple-touch-icon` and
+  OpenGraph — **about 160 KB off every page load**. The four screenshots (~310 KB, all eager, all
+  below the fold) now carry `loading="lazy" decoding="async"`. And the four unused
+  `assets/img/bg/splat*.png` are gone, confirmed referenced by no HTML, CSS or JS.
+
+- [x] **Extend the Pages workflow to guard the new invariants** — **done, and every guard was proven to fail**
   The workflow is a good model already. Add `404.html` and `sitemap.xml` to the required-files
   loop; assert each page's canonical matches its own path so a copy-paste cannot point two pages at
   one canonical; run a link checker over the built tree (there are cross-page anchors nobody tests
@@ -971,6 +1027,37 @@ these are the structural and delivery problems in `website/` and `.github/workfl
   renamed heading id fails silently); and assert no `http://` URL and no unexpected third-party
   host appears under `website/`, which would have caught the undisclosed hCaptcha script. Also add
   a website section to the README, which never mentions the site at all.
+
+  **Done: four new steps, taking the build job from three checks to seven.** `404.html` and
+  `sitemap.xml` added to the required-files loop; each page's canonical must match its own path
+  (these `<head>` blocks were written by copying the previous page's, which is precisely how two
+  pages end up claiming one canonical); the sitemap must list exactly the set of canonicals;
+  every in-page anchor must resolve, including cross-page ones like `/whaaack/#adfree` from the
+  privacy page, which fail silently today because the link still loads and simply scrolls
+  nowhere; and no cleartext `http://` URL or undeclared third-party host may appear.
+
+  **Every guard was verified by breaking the thing it guards.** All seven pass on a clean tree,
+  and ten deliberate breakages are caught: a deleted page, a redirected contact form, a
+  duplicated canonical, a sitemap entry dropped and a phantom one added, a renamed anchor id, a
+  broken cross-page anchor, an undeclared host, a cleartext URL, and a stray CNAME.
+
+  Getting there turned up two flaws worth recording. The host check first used `comm`, which
+  needs both inputs sorted in the same collation and *silently misreports* when they are not — it
+  warned and still exited 0, a guard passing for the wrong reason; it uses `grep -vxF` now. And
+  the first harness ran the steps through Python's `subprocess`, which on this machine resolves
+  to WSL bash and pre-expanded `$f` to empty, making two healthy guards look broken — these
+  checks are only meaningful run under the same shell Actions uses. Re-running the fixed host
+  check immediately caught a genuinely missing entry, `uokik.gov.pl`, linked from the terms.
+
+  One thing to know about that allow-list: only **three** of its hosts actually receive data —
+  `idct.tech`, `js.hcaptcha.com` (a script tag) and `api.web3forms.com` (on submit). Those are
+  the three that must appear in the privacy policy's recipients list. The rest are plain outbound
+  links, allow-listed anyway because a new host deserves one deliberate look, and because a link
+  and a resource load are one attribute apart. `play.google.com` is pre-approved so the store
+  badge landing at launch does not red-light CI for no reason.
+
+  The README now has a website section covering the URL, the project-page-under-apex constraint
+  (no CNAME, and why `app-ads.txt` cannot live here) and what CI enforces.
 
 ---
 
