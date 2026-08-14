@@ -106,18 +106,19 @@ docs/GO-TO-PRODUCTION-NON-TECHNICAL.md  what is left in a console or a contract
 terms, account-deletion page and contact form. Plain static HTML, no framework and no build
 step, in [website/](website/).
 
-Everything the site shows of the game is **the game**, not a mockup: the hero video and the
-four screenshots in the fan are cut from one recorded run.
+Everything the site shows of the game is **the game**, not a mockup: the two screens floating
+in the hero and the four in the fan are frames from one real run.
 
 ```bash
 python tools/capture_gameplay.py
 ```
 
 It drives the run itself — reads the screen, finds the fullest hole, taps it — because a
-recording of an idle board is worse than a still. Re-run it whenever the game's look
-changes. The script's header lists the four traps worth knowing about first, including why
-`screenrecord` needs an explicit `--size` and why pulling the file too early yields a video
-no player will open.
+capture of an idle board is worse than none, and writes a contact sheet so the good moments
+can be picked by eye. Re-run it whenever the game's look changes. The script's header lists
+the three traps worth knowing first, the main one being that the board is a fixed 4x4 grid,
+so finding fruit is sixteen means rather than blob detection — the version that labelled
+connected components took 23 seconds a frame against fruit that live for two.
 
 The only third-party thing on the page is nothing at all: no fonts, no icon CDN, no
 analytics. The Google Play mark is an inline SVG for that reason — every host the site

@@ -71,7 +71,6 @@
       Whaaack!
     </a>
     <nav class="nav">
-      <a href="#play">Play a round</a>
       <a href="#how">How it plays</a>
       <a href="#shots">Screens</a>
       <a href="#adfree">Ad-free</a>
@@ -121,7 +120,7 @@
               </span>
             </span>
 
-            <a class="btn btn-ghost" href="#play">Whack something now</a>
+            <a class="btn btn-ghost" href="#how">How it plays</a>
           </div>
 
           <p class="pkg">Package <code>tech.idct.whaaack</code></p>
@@ -142,49 +141,26 @@
         </div>
 
         <div class="reveal">
-          <div class="phone-stage">
-            <div class="phone phone-video tilt-r" data-tilt>
-              <!--
-                A real run, recorded off a device with screenrecord — not a mockup and not a
-                render. tools/capture_gameplay.py plays it and records it, so it can be redone
-                whenever the game changes.
-              -->
-              <video src="assets/video/gameplay.mp4"
-                     poster="assets/img/shots/gameplay-poster.webp"
-                     width="540" height="1202"
-                     autoplay muted loop playsinline preload="metadata"
-                     aria-label="A real Whaaack! run: fruit popping out of the board, splats where they were hit, and the millisecond counter climbing."></video>
-            </div>
-            <p class="stage-note">Actual gameplay, recorded on a device.</p>
+          <!--
+            Two real captures from one run, floated over each other: the board mid-game in
+            front, the score it ended on behind. Both come off a device via
+            tools/capture_gameplay.py — not mockups and not renders.
+          -->
+          <div class="hero-box" data-tilt>
+            <span class="glow" aria-hidden="true"></span>
+            <figure class="win win-back">
+              <img src="assets/img/shots/real-score.webp" width="540" height="1205"
+                   decoding="async"
+                   alt="The end of a run: three escaped, 5,848 milliseconds survived, four hits.">
+            </figure>
+            <figure class="win win-front">
+              <img src="assets/img/shots/real-run.webp" width="540" height="1205"
+                   fetchpriority="high" decoding="async"
+                   alt="A run in progress at 4,763 milliseconds: a kiwi up, a splat where the last fruit was hit, one strike taken.">
+            </figure>
           </div>
+          <p class="stage-note">Real screens, captured on a device.</p>
         </div>
-      </div>
-    </div>
-  </section>
-
-  <section class="section" id="play">
-    <div class="wrap">
-      <div class="section-head reveal">
-        <span class="eyebrow">Try it</span>
-        <h2>Here is the whole game.</h2>
-        <p class="lead">
-          One board, one rule. This is a toy version running in the page — the real thing is
-          faster, keeps score properly and does not stop at four fruit.
-        </p>
-      </div>
-
-      <div class="demo reveal" id="demo">
-        <div class="demo-hud">
-          <div class="demo-score"><b data-demo-ms>0</b><small>ms</small></div>
-          <div class="demo-meta">
-            <span data-demo-hits>0 hits</span>
-            <span class="demo-strikes" data-demo-strikes aria-label="Strikes remaining"></span>
-          </div>
-        </div>
-        <!-- Filled by site.js. Without JS this stays empty and the section reads as prose. -->
-        <div class="demo-board" data-demo-board></div>
-        <button class="btn btn-primary btn-demo" type="button" data-demo-start>Start</button>
-        <p class="demo-hint" data-demo-hint>Whack the fruit before it ducks back down.</p>
       </div>
     </div>
   </section>
