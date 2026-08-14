@@ -16,12 +16,12 @@ See also: **[non-technical plan](GO-TO-PRODUCTION-NON-TECHNICAL.md)**.
 
 ## Where this stands
 
-**38 of 96 done.** Sections are ordered by when you need them, not by size.
+**41 of 96 done.** Sections are ordered by when you need them, not by size.
 
 | Section | Done |
 | --- | --- |
 | 1. Engineering decisions to settle first | 0 / 3 |
-| 2. Release engineering — the build has never been signed or run | 0 / 21 |
+| 2. Release engineering — the build has never been signed or run | 3 / 21 |
 | 3. Code — defects that block or damage the launch | **done** |
 | 4. Backend — Supabase | 6 / 21 |
 | 5. Ads and billing — the code side | 1 / 13 |
@@ -122,7 +122,7 @@ buried in an implementation section.
 This is the critical path. Until there is a signing config there is no installable release
 artifact, and until there is one, nothing below it has actually been exercised.
 
-- [ ] **Create the upload keystore and wire a `signingConfig` into Gradle** 🔴
+- [x] **Create the upload keystore and wire a `signingConfig` into Gradle** — **done**
   `app/build.gradle.kts` has a `release` block with minification and ProGuard but **no
   `signingConfigs` and no `signingConfig` assignment** — a repo-wide grep returns nothing.
   `bundleRelease` succeeds and produces a 12.9 MB `.aab` with **zero META-INF entries**: it is
@@ -134,11 +134,35 @@ artifact, and until there is one, nothing below it has actually been exercised.
   the keystore existing so a machine without it still configures. Verify with
   `jarsigner -verify -verbose -certs app/build/outputs/bundle/release/app-release.aab`.
 
-- [ ] **Close the `.gitignore` gap *before* running keytool** 🔴
+  **Done.** 4096-bit RSA, alias `whaaack-upload`, valid to 2053, `CN=IDCT Bartosz Pacholek,
+  O=IDCT, L=Szczecin, C=PL`, living at `~/keys/whaaack/whaaack-upload.jks` — outside the repo.
+  Passwords in a git-ignored `keystore.properties`, with a `WHAAACK_*` environment fallback so
+  CI can inject the same values. `jarsigner -verify` now reports the bundle signed by that
+  certificate.
+
+  **Upload key fingerprints** — the SHA-1 goes on the Android OAuth client:
+  `SHA1 50:1F:E5:E0:75:FA:5A:93:3F:35:50:05:58:25:D2:DE:26:8B:13:4B`,
+  `SHA256 7D:67:A1:F4:A1:BF:AD:20:AB:25:18:6A:C5:EE:89:28:4B:25:02:67:04:ED:14:3A:0B:D8:01:F5:C7:85:31:8D`.
+
+  Two things worth keeping. A missing `keystore.properties` still configures and builds
+  unsigned, so a fresh clone and a secretless CI runner keep working — but one that *points at
+  a path which does not resolve* is a hard error rather than a silent downgrade. That is not
+  hypothetical: the first attempt wrote the path in Git Bash form (`/c/Users/...`), which the
+  JVM on Windows cannot open, and the build stayed green while handing back an unsigned bundle.
+  And the signature-scheme flags are left at AGP defaults: an App Bundle is signed with JAR
+  signing, not the APK signature schemes, so switching v1 off because minSdk 26 makes it
+  redundant would have been wrong for the artifact that actually gets uploaded.
+
+- [x] **Close the `.gitignore` gap *before* running keytool** — **done, and the gap was real**
   `.gitignore` has `*.keystore` but **not `*.jks`** — which is exactly what keytool and Android
   Studio produce by default, so the key you are about to create would be committed on the next
   `git add .` in a public repo. Add `*.jks`, `keystore.properties`, `*.p12`, `*.pepk` and `*.der`
   first, then confirm with `git check-ignore -v upload-keystore.jks keystore.properties`.
+
+  **Done before the key existed**, and the gap was exactly as described — `git check-ignore`
+  confirmed `upload-keystore.jks`, `keystore.properties`, `*.p12`, `*.pepk` and `*.der` would
+  all have been committed on a public repo. Added; `debug.keystore` is still deliberately
+  tracked.
 
 - [ ] **Back up the upload key and record its fingerprints** 🔴
   Play App Signing means a lost *app signing* key is recoverable by Google, but a lost *upload*
@@ -160,7 +184,7 @@ artifact, and until there is one, nothing below it has actually been exercised.
   `whaaack://auth` deep link is a custom scheme, not an App Link, so no `assetlinks.json` is
   needed for *this* item (but see §4).
 
-- [ ] **Ship an `.aab`, not an `.apk`, and make a conscious call on the split dimensions** 🔴
+- [x] **Ship an `.aab`, not an `.apk`** — **done; splits left at bundletool defaults, deliberately**
   Play has required App Bundles for new apps since Aug 2021, so `bundleRelease` is the upload
   artifact — nothing in the repo mentions it; SETUP.md §5 documents only `assembleDebug`. The
   bundle's `BundleConfig.pb` has an empty `splits_config`, so bundletool defaults apply (ABI,
@@ -189,7 +213,7 @@ artifact, and until there is one, nothing below it has actually been exercised.
   `pub-6904561240517963` segment. Worth five minutes precisely because the failure is invisible: a
   release on the test unit serves perfect always-fill ads and earns exactly nothing.
 
-- [ ] **Build, install and actually *run* the R8-minified release build** 🔴
+- [ ] **Build, install and actually *run* the R8-minified release build** — **first pass done; the account paths remain** 🔴
   It has never been executed once — the only release artifact ever produced is
   `app-release-unsigned.apk`, which cannot be installed, so every reflection-sensitive path in the
   shrunk build is unverified. `assembleRelease` compiling clean is not the same thing. Once
@@ -199,6 +223,25 @@ artifact, and until there is one, nothing below it has actually been exercised.
   `queryProductDetails`/`queryPurchasesAsync` pair, DataStore reads and writes, and a full run
   including surface teardown — with `adb logcat -s AndroidRuntime:E` open. Note debug and release
   share the applicationId with no suffix, so `adb uninstall tech.idct.whaaack` first.
+
+  **First run ever, and it passes the part that was most likely to break.** `bundleRelease` now
+  produces a signed AAB; bundletool turns it into an 8.9 MB universal APK that installs and
+  runs. On an API 37 emulator the minified build launches, shows the **real published UMP
+  consent form** (branded, 210 partners), and **loads live leaderboard rows from Supabase** —
+  which is the single most R8-sensitive path in the app, exercising OkHttp TLS, the
+  `kotlinx.serialization` `JsonElement` parsing and the SECURITY DEFINER RPC in one go. No
+  `ClassNotFoundException`, `NoSuchMethodError` or `SerializationException` anywhere.
+
+  The one log line that looks alarming is not: UMP probes for
+  `com.google.firebase.analytics.FirebaseAnalytics`, which this app does not bundle, and
+  degrades gracefully. Expected, not an R8 casualty.
+
+  **Still unexercised on a minified build**, and each needs an account or a purchase rather
+  than more R8 confidence: email sign-up and sign-in, the `whaaack://auth` deep link, Google
+  sign-in through Credential Manager, an actual interstitial, `BillingManager`'s
+  `queryProductDetails`/`queryPurchasesAsync` pair, and a full game run through surface
+  teardown. Worth doing on a real device from an internal-testing install, since several of
+  them only behave correctly when the app came from Play.
 
 - [ ] **Define the versionCode discipline before the first upload burns code 1** 🟡
   `versionCode = 1` is legal for a genuinely first upload — the SETUP.md checklist item is
