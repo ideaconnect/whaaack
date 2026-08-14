@@ -120,6 +120,39 @@ def fill_holes(mask: np.ndarray) -> np.ndarray:
 # --------------------------------------------------------------- geometry
 
 
+def centroid_circle(alpha: np.ndarray, mask: np.ndarray) -> tuple[float, float, float]:
+    """Circle centred on the art's centre of mass, sized to still contain all of it.
+
+    Returns (cx, cy, r), interchangeable with `min_enclosing_circle`.
+
+    The minimum enclosing circle is defined entirely by the two or three most extreme
+    pixels, so a single far-flung splat tendril decides where its centre is. On this
+    artwork that put the centre 13px right of the ink's actual mass, and since `place`
+    pins that centre to the middle of the canvas, every surface drew the icon about
+    1.2dp left of where it looked like it should be — a visible gap down the right of
+    every launcher mask.
+
+    Centring on the alpha-weighted centroid instead costs a little size: the smallest
+    circle *about that point* is necessarily larger than the true minimum (here ~3%),
+    so the art scales down to keep clearing the mask. Measured on the shipped icon, it
+    takes the ink's offset from (-5.0, +1.0)px to (0.0, +0.5) on a 300px render, which
+    is worth 3% of a dimension nobody can eyeball.
+
+    Weighted by alpha rather than by a hand-tuned salience term. A luminance-weighted
+    variant was tried and over-corrected — it chases the bright melon slice and pushes
+    the whole composition low, trading a left bias for a downward one.
+    """
+    w = alpha.astype(np.float64)
+    if w.sum() <= 0:
+        return min_enclosing_circle(mask)
+    h, wd = w.shape
+    cx = float((w * np.arange(wd)[None, :]).sum() / w.sum())
+    cy = float((w * np.arange(h)[:, None]).sum() / w.sum())
+    ys, xs = np.nonzero(mask)
+    r = float(np.hypot(xs - cx, ys - cy).max())
+    return cx, cy, r
+
+
 def min_enclosing_circle(mask: np.ndarray, seed: int = 7) -> tuple[float, float, float]:
     """Smallest circle containing every True pixel. Returns (cx, cy, r).
 

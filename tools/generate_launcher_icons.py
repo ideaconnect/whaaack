@@ -130,10 +130,10 @@ def main() -> int:
 
     src = Image.open(SOURCE).convert("RGBA")
     masks = segment(src)
-    circle = K.min_enclosing_circle(masks["ink"])
+    circle = K.centroid_circle(np.array(src)[..., 3], masks["ink"])
     mono = monochrome_art(src, masks)
     cx, cy, radius = circle
-    print(f"{SOURCE.name}: {src.size[0]}px, enclosing circle r={radius:.1f} at ({cx:.1f},{cy:.1f})")
+    print(f"{SOURCE.name}: {src.size[0]}px, circle r={radius:.1f} centred on the art's mass at ({cx:.1f},{cy:.1f})")
 
     total = 0
     for bucket, density in DENSITIES.items():
