@@ -147,6 +147,10 @@ Its secret is in the downloaded JSON under `secrets/` (git-ignored). This is the
 compiles in — `GOOGLE_WEB_CLIENT_ID` in `local.properties`, already set — and the one
 Supabase verifies ID tokens against.
 
+Putting the **Android** id in `GOOGLE_WEB_CLIENT_ID` is the classic failure here, and it does
+not announce itself: you get an `aud` mismatch on the token rather than anything that reads
+like a configuration error.
+
 It was created with `https://…supabase.co/auth/v1/callback` as a redirect URI, which is
 unused by the native flow and auto-added `supabase.co` to the consent screen's authorized
 domains. Harmless while the app needs no verification review; drop both if you ever want
@@ -165,8 +169,19 @@ supabase config push
 
 Both ids go in `GOOGLE_CLIENT_ID`, web first — the remote splits on the comma into the
 client id plus the dashboard's *Authorized Client IDs*, which is what makes Supabase accept
-a token minted for the native app. See the note in `config.toml` for why they cannot be two
-separate variables.
+a token minted for the native app.
+
+They cannot be two separate variables. The CLI's substitution matcher is anchored —
+`^env\((.*)\)$` — so the whole value has to be one `env()` call; `"env(A),env(B)"` matches
+nothing and is pushed verbatim as that literal string. Hardcoding both ids in `config.toml`
+is also fine if you prefer: client ids are not secrets, and the web one already ships inside
+the APK.
+
+**If you would rather not risk a `config push` at all**, the dashboard does the same job:
+Authentication → Sign In / Providers → Google — paste the web id as *Client ID*, the web
+secret as *Client Secret*, and the Android id under *Authorized Client IDs*. That route
+touches nothing else, which is its whole advantage now that SMTP is working (§2): a push
+rewrites the entire auth config from this file, including the SMTP password.
 
 ### Consent screen
 
