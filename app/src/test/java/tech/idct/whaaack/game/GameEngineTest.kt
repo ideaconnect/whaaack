@@ -353,6 +353,33 @@ class GameEngineTest {
     }
 
     @Test
+    fun `past the tuned opening, no level is a third harder than the one before`() {
+        // The complaint, made testable: level 8 to 9 used to jump 6.9 to 9.6 arrivals per
+        // second — a 39% step, because a fifth fruit landed exactly where both pace tracks
+        // bottomed out. A discrete new fruit is always a step, but it should read as a gear
+        // change rather than a wall.
+        //
+        // Measured from the fourth slot on. The opening deliberately steps harder than this
+        // (level 5 is +73%, level 6 +57%, as the third and fourth fruit arrive) and that is
+        // the tuning the game shipped with and nobody objected to — the complaint was about
+        // what happens *after* it, which is the part that changed.
+        var previous = 0.0
+        for (level in GameEngine.FOURTH_TARGET_LEVEL..GameEngine.TOP_SPEED_LEVEL) {
+            val pressure = GameEngine.targetsAtLevel(level) * 1000.0 /
+                (GameEngine.spawnIntervalMs(level) * 0.35 + GameEngine.fruitLifeMs(level))
+            if (level > GameEngine.FOURTH_TARGET_LEVEL) {
+                val jump = pressure / previous
+                val percent = ((jump - 1) * 100).toInt()
+                assertTrue(
+                    "level " + level + " is " + percent + "% harder than the one before it",
+                    jump <= 1.30,
+                )
+            }
+            previous = pressure
+        }
+    }
+
+    @Test
     fun `the pace tightens for ever without ever degenerating`() {
         for (level in 1..500) {
             val life = GameEngine.fruitLifeMs(level)
@@ -391,11 +418,16 @@ class GameEngineTest {
     }
 
     @Test
-    fun `slots open every three levels and stop at one per tile`() {
+    fun `the fourth slot holds until level 12, then one opens every four`() {
+        // The shape that matters: four fruit are held through the levels where both pace
+        // tracks reach their knee, so the run does not take three step-changes at once around
+        // the thirty-second mark. That was the wall.
         assertEquals(4, GameEngine.targetsAtLevel(8))
-        assertEquals(5, GameEngine.targetsAtLevel(9))
-        assertEquals(5, GameEngine.targetsAtLevel(11))
-        assertEquals(6, GameEngine.targetsAtLevel(12))
+        assertEquals(4, GameEngine.targetsAtLevel(9))
+        assertEquals(4, GameEngine.targetsAtLevel(11))
+        assertEquals(5, GameEngine.targetsAtLevel(12))
+        assertEquals(5, GameEngine.targetsAtLevel(15))
+        assertEquals(6, GameEngine.targetsAtLevel(16))
 
         // The cap is physical: a seventeenth fruit has no tile to stand on.
         assertEquals(GameEngine.TILE_COUNT, GameEngine.MAX_TARGETS)

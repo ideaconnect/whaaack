@@ -516,15 +516,26 @@ class GameEngine(private val random: Random = Random.Default) {
         const val THIRD_TARGET_LEVEL = 5
         const val FOURTH_TARGET_LEVEL = 6
 
-        /** Levels between each further slot opening, once the tuned opening is past. */
-        const val TARGET_STEP_LEVELS = 3
+        /**
+         * Level the fifth slot opens. Deliberately well past the fourth rather than three
+         * levels after it: the fourth arrives at level 6 and both pace tracks reach their knee
+         * at 9 and 10, so a new fruit there stacked three step-changes inside four levels —
+         * around thirty seconds in, which is where the run stopped being a ramp and became a
+         * wall. Holding at four through level 11 leaves a stretch at the old curve's plateau,
+         * the difficulty this game was actually tuned around, before the ladder climbs again.
+         */
+        const val FIFTH_TARGET_LEVEL = 12
+
+        /** Levels between each further slot opening, once the fifth has landed. */
+        const val TARGET_STEP_LEVELS = 4
 
         /**
          * How many slots cycle at [level].
          *
          * The opening is untouched — two fruit, a third at level 5, a fourth at level 6, all
-         * as tuned. What changed is that it no longer stops there: from the fourth slot on, one
-         * more opens every [TARGET_STEP_LEVELS] levels until the board is full.
+         * as tuned. What changed is that it no longer stops there: a fifth opens at
+         * [FIFTH_TARGET_LEVEL], and one more every [TARGET_STEP_LEVELS] levels after that,
+         * until the board is full.
          *
          * That is what makes a run end. The curve used to flatten completely at level 10, so
          * past forty seconds nothing got harder ever again and the score stopped measuring
@@ -536,7 +547,8 @@ class GameEngine(private val random: Random = Random.Default) {
         fun targetsAtLevel(level: Int): Int = when {
             level < THIRD_TARGET_LEVEL -> BASE_TARGETS
             level < FOURTH_TARGET_LEVEL -> 3
-            else -> min(4 + (level - FOURTH_TARGET_LEVEL) / TARGET_STEP_LEVELS, MAX_TARGETS)
+            level < FIFTH_TARGET_LEVEL -> 4
+            else -> min(5 + (level - FIFTH_TARGET_LEVEL) / TARGET_STEP_LEVELS, MAX_TARGETS)
         }
 
         const val MAX_STRIKES = 3
@@ -591,7 +603,9 @@ class GameEngine(private val random: Random = Random.Default) {
          * top of a growing fruit count makes the endgame collapse in a couple of levels
          * instead of tightening.
          */
-        private const val TAIL_DECAY = 0.97
+        // Softened from 0.97 after playing it: at 0.97 the pace was still visibly tightening
+        // while the slot count climbed, and the two compounding was too much too soon.
+        private const val TAIL_DECAY = 0.985
 
         /**
          * Linear while [start] - level x [step] is still above [knee], then an asymptotic
