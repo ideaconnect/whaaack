@@ -14,9 +14,10 @@ import com.android.billingclient.api.ProductDetails
 import com.android.billingclient.api.Purchase
 import com.android.billingclient.api.PurchasesUpdatedListener
 import com.android.billingclient.api.QueryProductDetailsParams
+import com.android.billingclient.api.QueryProductDetailsResult
 import com.android.billingclient.api.QueryPurchasesParams
+import com.android.billingclient.api.UnfetchedProduct
 import com.android.billingclient.api.acknowledgePurchase
-import com.android.billingclient.api.queryProductDetails
 import com.android.billingclient.api.queryPurchasesAsync
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
@@ -96,6 +97,19 @@ class BillingManager(
     sealed interface Event {
         /** Payment is not secured yet — cash, carrier billing or parental approval. */
         data object PurchasePending : Event
+
+        /**
+         * The sheet opened and then failed — a declined card, a network drop, a service
+         * outage. Deliberately not raised for USER_CANCELED, which is a decision rather than
+         * a failure and needs no commentary.
+         *
+         * Without this the whole thing is silent: `launchBillingFlow` already returned OK
+         * because the sheet did open, so the ViewModel's synchronous error path cannot fire,
+         * and the real outcome arrives here where it used to be logged and dropped. The
+         * player is left looking at the same screen and the same button, concluding the
+         * button is broken rather than that their payment failed.
+         */
+        data class PurchaseFailed(val responseCode: Int) : Event
     }
 
     private val app = context.applicationContext
@@ -129,7 +143,10 @@ class BillingManager(
 
             BillingClient.BillingResponseCode.USER_CANCELED -> Unit
 
-            else -> Log.w(TAG, "Purchase flow: ${result.responseCode} ${result.debugMessage}")
+            else -> {
+                Log.w(TAG, "Purchase flow: ${result.responseCode} ${result.debugMessage}")
+                _events.tryEmit(Event.PurchaseFailed(result.responseCode))
+            }
         }
     }
 
@@ -172,6 +189,12 @@ class BillingManager(
     private var purchaseLaunchedAtMs = 0L
 
     /**
+     * Whether this process has already contributed a verified-online negative. The revoke
+     * rule is two of them; this is what keeps the two from being the same moment twice.
+     */
+    private var confirmedNotOwnedThisProcess = false
+
+    /**
      * Opaque, stable per-account handle for Play's fraud detection. Never the raw Supabase
      * id and never an email — Google's own guidance is that this value must not identify the
      * user to anyone reading an order.
@@ -204,6 +227,20 @@ class BillingManager(
      */
     fun onResume() {
         scope.launch { refresh("resume") }
+    }
+
+    /**
+     * Asks again because something wanted to offer the product and had no price for it.
+     *
+     * Without this, [price] is only ever populated at cold start and on return to the
+     * foreground — so a player who launched offline and then came back onto a network
+     * *without* the app going to the background never sees the upsell again for the whole
+     * session, however many ads they sit through. The caller is expected to rate-limit; the
+     * one that exists calls it only when an ad actually plays, which the interstitial cap
+     * already bounds to one every couple of minutes.
+     */
+    fun refreshOffer() {
+        scope.launch { refresh("offer-missing") }
     }
 
     // ---- connection ----------------------------------------------------------------
@@ -240,7 +277,22 @@ class BillingManager(
     /**
      * Asks Play for the product. Doubles as the liveness probe: this is the one call Google
      * documents as "performs a network query", so its OK is what proves the pass actually
-     * reached Google rather than a local cache.
+     * reached Google rather than a local cache. Returns whether Play answered — **not**
+     * whether there is anything to sell.
+     *
+     * The price obeys the same rule as the entitlement: it is only ever taken away on an
+     * answer, never on a silence. A non-OK response means the question did not get through,
+     * so whatever was on offer stays on offer — hiding a live product because one query timed
+     * out costs a sale, blanks the ad-break dialog, and tells the player nothing. Only an OK
+     * that came back without the product clears it, because that is Play saying it has
+     * nothing for this account.
+     *
+     * The reason is logged in every failing case. Which of them fired is the whole diagnosis
+     * when someone asks why the upsell is not showing, and it used to be entirely silent —
+     * `PRODUCT_NOT_FOUND` (wrong id, inactive, or still propagating) and `NO_ELIGIBLE_OFFER`
+     * (a purchase option that is not backwards compatible, so the singular
+     * `oneTimePurchaseOfferDetails` this code reads is empty) are completely different
+     * problems that present identically as a missing button.
      */
     private suspend fun probe(): Boolean {
         val params = QueryProductDetailsParams.newBuilder()
@@ -253,17 +305,57 @@ class BillingManager(
                 ),
             )
             .build()
-        val result = client.queryProductDetails(params)
-        if (result.billingResult.responseCode == BillingClient.BillingResponseCode.OK) {
-            _productDetails.value = result.productDetailsList
-                ?.firstOrNull { it.productId == productId }
+
+        val (billingResult, result) = queryProducts(params)
+        if (billingResult.responseCode != BillingClient.BillingResponseCode.OK) {
+            Log.i(TAG, "product query unanswered: ${billingResult.responseCode} " +
+                "${billingResult.debugMessage} — keeping the last known offer")
+            return false
+        }
+
+        val details = result?.productDetailsList?.firstOrNull { it.productId == productId }
+        if (details != null) {
+            _productDetails.value = details
             return true
         }
-        // ITEM_UNAVAILABLE is the expected answer while the product does not exist in the
-        // console yet: nothing to sell, so the button hides itself. It is emphatically NOT
-        // evidence about ownership, so it fails the probe like any other non-OK code.
+
+        // Play answered and did not include the product. In Billing 9 the reason rides in
+        // the unfetched list rather than in the response code, which is why this no longer
+        // looks for ITEM_UNAVAILABLE.
+        val unfetched = result?.unfetchedProductList?.firstOrNull { it.productId == productId }
+        Log.i(TAG, "no offer for $productId: ${unfetchedReason(unfetched?.statusCode)}")
         _productDetails.value = null
-        return false
+        return true
+    }
+
+    private fun unfetchedReason(status: Int?): String = when (status) {
+        null -> "absent from the response"
+        UnfetchedProduct.StatusCode.PRODUCT_NOT_FOUND ->
+            "PRODUCT_NOT_FOUND — no such id, or it is not Active, or it has not propagated yet"
+        UnfetchedProduct.StatusCode.NO_ELIGIBLE_OFFER ->
+            "NO_ELIGIBLE_OFFER — the purchase option is not backwards compatible, so the " +
+                "singular oneTimePurchaseOfferDetails is empty"
+        UnfetchedProduct.StatusCode.INVALID_PRODUCT_ID_FORMAT ->
+            "INVALID_PRODUCT_ID_FORMAT — REMOVE_ADS_PRODUCT_ID is malformed"
+        else -> "status $status"
+    }
+
+    /**
+     * The callback form rather than the `billing-ktx` suspend helper, which is otherwise
+     * exactly what this is: `ProductDetailsResult` keeps only the billing result and the
+     * fetched list, dropping `unfetchedProductList` — the half that says *why* nothing came
+     * back, and the only thing that makes a missing price diagnosable from a log.
+     */
+    private suspend fun queryProducts(
+        params: QueryProductDetailsParams,
+    ): Pair<BillingResult, QueryProductDetailsResult?> = suspendCancellableCoroutine { cont ->
+        var resumed = false
+        client.queryProductDetailsAsync(params) { billingResult, result ->
+            if (!resumed) {
+                resumed = true
+                cont.resume(billingResult to result)
+            }
+        }
     }
 
     // ---- the one decision ----------------------------------------------------------
@@ -339,16 +431,34 @@ class BillingManager(
         // asking Play anything; and "Restore purchases" answered "Couldn't reach Google
         // Play — nothing has changed" for a minute after any cancelled sheet, while Play was
         // perfectly reachable. A pass that can only ever *grant* must never be suppressed.
-        if (SystemClock.elapsedRealtime() - purchaseLaunchedAtMs < PURCHASE_SETTLE_MS) {
+        // The `!= 0L` matters: elapsedRealtime is uptime, so the sentinel 0 reads as "a
+        // purchase was launched at boot" for the first minute of every device's uptime.
+        if (purchaseLaunchedAtMs != 0L &&
+            SystemClock.elapsedRealtime() - purchaseLaunchedAtMs < PURCHASE_SETTLE_MS
+        ) {
             return@withLock conclude(Check.Unknown(0, "purchase-in-flight"))
         }
 
         // Verified online, Play said OK, the product is genuinely absent, and we currently
         // grant it. This is either a refund-and-revoke or a device that never owned it.
         // Confirm once more before taking anything away.
+        //
+        // At most one confirmation per process, which is what makes the second one worth
+        // anything. Every cold start runs two passes within a second of each other —
+        // `start()` and then MainActivity's `onResume()` — so without this guard both
+        // confirmations landed on the same launch, off two calls close enough together to
+        // fail the same way, and the "two verified-online negatives" rule collapsed into
+        // one. It also stops a player double-tapping Restore into a revocation.
+        if (confirmedNotOwnedThisProcess) {
+            return@withLock conclude(Check.NotOwned)
+        }
         val streak = store.bumpNotOwnedStreak()
+        confirmedNotOwnedThisProcess = true
         if (streak < REVOKE_CONFIRMATIONS) {
-            return@withLock conclude(Check.Unknown(code, "awaiting-revoke-confirmation"))
+            // Not Unknown: Play was reached and answered. Reporting this as "couldn't check"
+            // told a player tapping Restore that nothing had changed, while a counter that
+            // can end their entitlement had just moved.
+            return@withLock conclude(Check.NotOwned)
         }
 
         revoke(seq)
@@ -368,12 +478,17 @@ class BillingManager(
         if (productId !in purchase.products) return
         if (purchase.purchaseState != Purchase.PurchaseState.PURCHASED) return
 
+        // Grant *first*. Play has already reported this as PURCHASED, so the entitlement is
+        // owed the moment we see it, and acknowledgement is a separate obligation to Google
+        // rather than a condition of it. Acknowledging first put up to six seconds of backoff
+        // between paying and the ads stopping — with the Remove ads button still sitting
+        // there — and a process death inside that window left nothing on disk at all.
+        grant(++passSeq, purchase.orderId)
+
         // Acknowledge on every path that can see an unacknowledged purchase, not just the
         // listener: if the process dies between buying and acknowledging, Play auto-refunds
         // after three days and the player loses what they paid for.
         if (!purchase.isAcknowledged) acknowledge(purchase)
-
-        grant(++passSeq, purchase.orderId)
     }
 
     private suspend fun acknowledge(purchase: Purchase) {

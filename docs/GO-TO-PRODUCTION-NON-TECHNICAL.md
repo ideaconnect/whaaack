@@ -39,9 +39,8 @@ short.
 
 - [ ] **Create the app entry and confirm the two per-app settings that are not inherited** 🔴
   An established account carries the account-level work forward, but three things are per-app and
-  start empty: the **app entry** itself in Play Console, the **in-app product** (§7 — the
-  Monetize → Products page is unlocked by the existing payments profile, so this is now a
-  ten-minute task rather than a multi-day one), and the **AdMob app record** with its ad unit and
+  start empty: the **app entry** itself in Play Console, the **in-app product** (§7 — done,
+  `no.ads.forever` is created and Active), and the **AdMob app record** with its ad unit and
   its store link (§6). Also re-confirm one account-level item that is per-app in practice: the EU
   **trader status** declaration is account-level, but country availability per app still shows
   "blocked" if it has lapsed — check it reads Trader with a green badge before you set
@@ -143,6 +142,24 @@ the shipped assets have no established provenance.
 The privacy policy and terms are unusually thorough for an indie release, which is exactly why
 the remaining gaps stand out. Google cross-checks the policy against the Data safety
 declaration, so several of these are also Play submission risks.
+
+- [ ] **Correct three statements about the paid unlock** 🟡
+  From a full review of the money paths against the shipped code. None is a lie, all three are
+  statements a refund dispute or a policy reviewer would test:
+  - **terms §6 promises more than the code delivers offline.** It says the unlock "follows you to
+    a new device and survives being offline". The second half is true only once *that install*
+    has confirmed the purchase with Play at least once — on a fresh install with no connectivity,
+    a paying player sees ads until Play is reachable, which `BillingManager`'s own header calls a
+    deliberate consequence. Qualify the sentence rather than change the code: seeding the
+    entitlement any other way hands the product to everyone.
+  - **privacy §"Purchases" understates what stays on the device.** It says the purchase is "held
+    by Google Play"; the app also keeps, in its own DataStore, whether you own it, the Play order
+    id (so support can look a purchase up) and the time of the last check. Nothing leaves the
+    device — which is the easy sentence to write and the one currently missing.
+  - **the obfuscated account id is disclosed nowhere.** Purchases carry a SHA-256 of the Supabase
+    user id to Play as `obfuscatedAccountId`, for Google's fraud detection. It is pseudonymous
+    and Google's own guidance asks for it, but it is still a transfer to a named recipient and
+    belongs in the recipients table beside the rest.
 
 - [ ] **Add the three undisclosed processors to the privacy policy** 🔴
   The policy is unusually thorough — a per-purpose lawful-basis table, a recipients list, transfers,
@@ -279,7 +296,7 @@ section is a submission gate as well as a policy one.
 
 - [ ] **Enter the privacy policy URL** 🔴
   `https://idct.tech/whaaack/privacy/` — use the canonical trailing-slash form so an automated
-  checker never sees a redirect. The page is live and thorough; SETUP.md §6 still lists it as
+  checker never sees a redirect. The page is live and thorough; SETUP.md §7 still lists it as
   unpublished, which is stale — fix that line.
 
 - [ ] **Declare "Contains ads" and the Advertising ID** 🔴
@@ -492,19 +509,26 @@ skipped.
 The client is complete and ships safely without the product — the button hides itself on
 `ITEM_UNAVAILABLE`. Testing the flow is in the [technical plan](GO-TO-PRODUCTION-TECHNICAL.md).
 
-- [ ] **Create and activate `whaaack_remove_ads`** 🔴
-  The product id is compiled in as a BuildConfig default and `local.properties` does not override
-  it, so that exact string ships. Play Console → Monetize → Products → One-time products → Create,
-  with the Product ID **exactly** `whaaack_remove_ads` — ids are permanent and cannot be reused
-  after deletion, so a typo is unrecoverable. Name ≤55 chars, description ≤200 consistent with the
-  in-app copy ("One-time purchase, no subscription"). Set a base price, auto-convert, eyeball the
-  rounded locals, set availability, save, and then **Activate** — a saved-but-inactive product
-  returns `ITEM_UNAVAILABLE` exactly like a nonexistent one, which is the single most common "my
-  IAP doesn't show up" cause. The payments profile is already verified, so the page is unlocked; but
-  the console may require an AAB on some track first. Allow up to 24h for propagation before
-  concluding it is broken. Shipping *without* the product is safe by design — the button hides
-  itself — but the website and terms already advertise the unlock, so a launch without it makes
-  both documents inaccurate.
+- [x] **Create and activate the one-time product** ✅
+  Done, 14 Aug 2026: **`no.ads.forever`**, "Whaaack the ads!", with one purchase option
+  `no-ads-forever-buy` — type Buy, **Active**, 173 countries/regions, and flagged **backwards
+  compatible**, which is the property the client depends on (see the offer-model item in the
+  [technical plan](GO-TO-PRODUCTION-TECHNICAL.md)). The id was `whaaack_remove_ads` here and in
+  the build until the real product existed; `app/build.gradle.kts` now compiles in
+  `no.ads.forever` as the BuildConfig default, and `local.properties` does not override it, so
+  that exact string ships. Ids are permanent and cannot be reused after deletion — this one is
+  now fixed for the life of the app.
+
+  Two loose ends, both cosmetic and both console-side:
+  - the store description reads "Removes completely ads from the game, forever." — the adverb is
+    in the wrong place, and this string is shown to buyers inside Play's sheet. "Removes ads from
+    the game completely, forever." reads properly and is still well inside the 200-char limit;
+  - the tag **advertisment** is misspelled (advertisement). Tags are only discovery metadata, so
+    nothing breaks, but they are visible in the console to anyone who inherits this account.
+
+  Allow up to 24h after any edit before concluding propagation is broken, and note that a
+  saved-but-*inactive* product returns `ITEM_UNAVAILABLE` exactly like a nonexistent one — the
+  single most common "my IAP doesn't show up" cause. This one is already Active.
 
 - [ ] **Write the refund runbook** 🟡
   Refunding an order in Play Console does **not** remove the entitlement unless you explicitly tick

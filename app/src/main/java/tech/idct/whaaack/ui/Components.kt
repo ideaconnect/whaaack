@@ -494,6 +494,12 @@ private const val CLICK_DEBOUNCE_MS = 500L
 fun RemoveAdsButton(
     price: String,
     modifier: Modifier = Modifier,
+    /**
+     * Overridable because the ad-break dialog is a good deal narrower than the screens this
+     * was drawn for, and the default wraps onto two lines in it — where the sentence above
+     * the button has already said "one-time" anyway.
+     */
+    subtitle: String = "One-time purchase, no subscription",
     onClick: () -> Unit,
 ) {
     val shape = RoundedCornerShape(18.dp)
@@ -520,11 +526,7 @@ fun RemoveAdsButton(
         }
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Text("Remove ads", color = Cream, fontSize = 14.sp, fontWeight = FontWeight.Black)
-            Text(
-                "One-time purchase, no subscription",
-                color = Color(0x9EFFF3E6),
-                fontSize = 11.sp,
-            )
+            Text(subtitle, color = Color(0x9EFFF3E6), fontSize = 11.sp)
         }
         Text(price, color = CrownGold, fontSize = 14.sp, fontWeight = FontWeight.Black)
     }

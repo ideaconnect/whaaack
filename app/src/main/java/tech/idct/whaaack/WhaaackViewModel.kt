@@ -91,6 +91,14 @@ data class UiState(
     val adsRemoved: Boolean? = null,
     /** Localised price from Play, or null when there is nothing to sell. */
     val removeAdsPrice: String? = null,
+    /**
+     * The ad-break prompt is up: an ad is about to play and the player is being told so,
+     * and offered the way out. Only ever raised when both halves of that are true — see
+     * [WhaaackViewModel.withAd].
+     */
+    val adPrompt: Boolean = false,
+    /** A "Restore purchases" pass is in flight. It can take ten seconds; it has to show. */
+    val restoringPurchases: Boolean = false,
 ) {
     /** The upsell is only offered once we know they have not already bought it. */
     val canBuyRemoveAds: Boolean get() = adsRemoved == false && removeAdsPrice != null
@@ -175,6 +183,10 @@ class WhaaackViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             billing.price.collect { details ->
                 val formatted = details?.oneTimePurchaseOfferDetails?.formattedPrice
+                    // Debug builds only, and only when asked for in local.properties: Play
+                    // does not price a product for a sideloaded APK, so without this the
+                    // upsell can never be seen on a development device. Empty in release.
+                    ?: BuildConfig.REMOVE_ADS_PLACEHOLDER_PRICE.takeIf { it.isNotBlank() }
                 _state.update { it.copy(removeAdsPrice = formatted) }
             }
         }
@@ -185,6 +197,12 @@ class WhaaackViewModel(app: Application) : AndroidViewModel(app) {
                 val message = when (event) {
                     is BillingManager.Event.PurchasePending ->
                         "That purchase is still being confirmed by Google Play."
+                    // Deliberately does not quote the response code at the player: none of
+                    // them are actionable, and Play has usually shown its own reason already.
+                    // What this has to do is break the silence, so a failed payment does not
+                    // read as a dead button.
+                    is BillingManager.Event.PurchaseFailed ->
+                        "That purchase didn't go through. Nothing has been charged."
                 }
                 _state.update { it.copy(toast = message) }
             }
@@ -323,10 +341,77 @@ class WhaaackViewModel(app: Application) : AndroidViewModel(app) {
 
     // ---- ads -----------------------------------------------------------------------
 
-    /** Runs [then] after the interstitial, or immediately when none is available. */
+    /**
+     * Where the player was going when the ad break was raised. Held here rather than in
+     * [UiState] because it is a continuation, not something to render, and because it must
+     * survive a recomposition without ever being run twice.
+     */
+    private var afterAdBreak: (() -> Unit)? = null
+
+    /**
+     * Runs [then] after the interstitial, or immediately when none is available.
+     *
+     * When an ad genuinely is about to play *and* there is an unlock to sell, the player is
+     * told first. Both halves are required: a prompt in front of a screen that was never
+     * going to show an ad is an extra tap for nothing, and a prompt with nothing to offer is
+     * an apology with no way to act on it — the game-over caption already covers that case.
+     */
     fun withAd(activity: Activity, then: () -> Unit) {
         audio.blip()
+        val adComing = ads.wouldShow()
+        if (adComing && _state.value.canBuyRemoveAds) {
+            afterAdBreak = then
+            _state.update { it.copy(adPrompt = true) }
+            return
+        }
+        // An ad is about to play and there was nothing to offer instead of it. The only way
+        // to reach here is a missing price — an ad cannot play at all unless the entitlement
+        // is known to be absent — so ask Play again, in time for the next break. Bounded by
+        // the interstitial cap rather than by a timer of its own.
+        if (adComing) billing.refreshOffer()
         ads.showThen(activity, then)
+    }
+
+    /** The player accepted the ad break. The ad plays, then they go where they asked. */
+    fun continueThroughAdBreak(activity: Activity?) {
+        val next = consumeAdBreak() ?: return
+        // No Activity means nothing can be presented; the navigation still has to happen.
+        if (activity == null) next() else ads.showThen(activity, next)
+    }
+
+    /**
+     * The prompt was dismissed without a choice — the back gesture, or a tap outside it. That
+     * is a cancel: no ad, no navigation, and the player is left exactly where they were with
+     * both buttons still live.
+     *
+     * The alternative — treating dismissal as "continue" — meant an accidental back gesture
+     * was answered with a full-screen ad nobody asked for, which is a worse outcome than any
+     * it prevents. It cannot be used to dodge advertising either: every route off the
+     * game-over screen still raises this prompt while an ad is pending, so cancelling buys
+     * the player nothing but the screen they were already on.
+     */
+    fun cancelAdBreak() {
+        consumeAdBreak()
+    }
+
+    /**
+     * The player bought their way out instead. The ad is skipped rather than raced against
+     * Play's sheet, and the navigation is not held behind the purchase: the entitlement
+     * arrives through [BillingManager] whenever it arrives, and by then the player is
+     * wherever they were trying to go.
+     */
+    fun buyRemoveAdsFromAdBreak(activity: Activity?) {
+        val next = consumeAdBreak() ?: return
+        if (activity != null) buyRemoveAds(activity)
+        next()
+    }
+
+    /** Takes the pending navigation and lowers the prompt, so neither can be used twice. */
+    private fun consumeAdBreak(): (() -> Unit)? {
+        val next = afterAdBreak
+        afterAdBreak = null
+        _state.update { it.copy(adPrompt = false) }
+        return next
     }
 
     fun playAgain(activity: Activity) = withAd(activity) {
@@ -367,6 +452,10 @@ class WhaaackViewModel(app: Application) : AndroidViewModel(app) {
     /** For a player who reinstalled or switched device and wants their unlock back. */
     fun restorePurchases() {
         audio.blip()
+        // Guarded as well as flagged: the row disables itself, but a second call would
+        // otherwise queue another pass behind the billing mutex and answer twice.
+        if (_state.value.restoringPurchases) return
+        _state.update { it.copy(restoringPurchases = true) }
         billing.restore { check ->
             val message = when (check) {
                 is BillingManager.Check.Owned -> "Ad-free restored. Thanks for the support!"
@@ -376,7 +465,7 @@ class WhaaackViewModel(app: Application) : AndroidViewModel(app) {
                 // to someone who paid is exactly the wrong answer.
                 is BillingManager.Check.Unknown -> "Couldn't reach Google Play — nothing has changed."
             }
-            _state.update { it.copy(toast = message) }
+            _state.update { it.copy(toast = message, restoringPurchases = false) }
         }
     }
 
@@ -385,6 +474,11 @@ class WhaaackViewModel(app: Application) : AndroidViewModel(app) {
         // Re-checks the entitlement, which is also how a purchase completed while the app was
         // in the background gets noticed.
         billing.onResume()
+        // Refills the ad slot. A load that failed — no fill, or offline at launch — is never
+        // retried on its own, so without this a session that started without a network never
+        // has an ad to show again however long it runs. No-ops when one is already loaded,
+        // when consent is missing, and when the player has paid.
+        ads.preload()
     }
 
     /**

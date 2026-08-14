@@ -148,6 +148,24 @@ class AdsManager(
         }
     }
 
+    /** True while an ad was shown recently enough that the next one is held back. */
+    private val capped: Boolean
+        get() = lastShownAtMs != 0L &&
+            SystemClock.elapsedRealtime() - lastShownAtMs < MIN_GAP_MS
+
+    /**
+     * Whether calling [showThen] right now would actually put an ad on the screen.
+     *
+     * Exists so the ad-break prompt can be raised only when there is an ad break: asking a
+     * player to sit through an extra tap before a screen that was never going to show them
+     * advertising is a worse experience than the advertising. It is the same set of
+     * conditions [showThen] checks, minus the presentation itself, which can still fail.
+     *
+     * Main thread only, like everything that reads [ad] — see [preload].
+     */
+    fun wouldShow(): Boolean =
+        adsAllowed && consent.canRequestAds && ad != null && !capped
+
     /**
      * Shows the ad if one is ready, then invokes [onFinished]. When no ad is available the
      * callback runs immediately, so the caller can treat this as "continue when done".
@@ -160,8 +178,6 @@ class AdsManager(
         }
 
         val ready = ad
-        val capped = lastShownAtMs != 0L &&
-            SystemClock.elapsedRealtime() - lastShownAtMs < MIN_GAP_MS
 
         if (!consent.canRequestAds || ready == null || capped) {
             preload()

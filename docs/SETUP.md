@@ -268,7 +268,53 @@ Pass it to `vm.gatherConsent(activity, debugDeviceHashedId = "ABCD…")` in `Mai
 
 ---
 
-## 5. Running it
+## 5. The ad-free unlock
+
+One one-time product, created and **Active** in Play Console:
+
+| | |
+|---|---|
+| Product id | `no.ads.forever` |
+| Name | Whaaack the ads! |
+| Purchase option | `no-ads-forever-buy`, type Buy, **backwards compatible**, 173 countries |
+
+The id is compiled in as the `REMOVE_ADS_PRODUCT_ID` BuildConfig default, so nothing needs to
+be set in `local.properties` for it. Backwards compatible is load-bearing: it is what keeps
+the singular `oneTimePurchaseOfferDetails` populated, which is where the price is read and why
+`launchPurchase` passes no offer token. Adding a second purchase option would empty that
+accessor and the upsell would quietly stop appearing.
+
+### Why the price is missing on a development build
+
+Play does not price a product for a build it did not install. A sideloaded debug APK
+(`installerPackageName=null`) gets `SERVICE_DISCONNECTED` or `ITEM_UNAVAILABLE` from
+`queryProductDetails`, so `BillingManager.price` stays null, and **every upsell hides itself**
+— the Home row, the Settings row and the ad-break dialog. Ads still play, because that path
+only needs to know the player has *not* bought it. This is correct behaviour, not a bug: there
+is nothing to sell, so nothing is offered.
+
+Seeing the real thing needs the real conditions — an AAB uploaded to a track, installed
+**from Play**, with the account added under Setup → Licence testing. The full matrix is in
+[GO-TO-PRODUCTION-TECHNICAL.md](GO-TO-PRODUCTION-TECHNICAL.md) §5.
+
+For working on the screens rather than the transaction, a debug build can stand a price in:
+
+```properties
+# local.properties — debug builds only, blank in release whatever this says
+REMOVE_ADS_PLACEHOLDER_PRICE=12,99 zł
+```
+
+That fills in the displayed price only. The purchase itself is not faked: tapping through
+still reaches Play, which declines, which is the half of the flow worth watching fail. Leave
+it blank to see exactly what production does.
+
+> `local.properties` is read as UTF-8 by `app/build.gradle.kts`. `Properties.load(InputStream)`
+> is specified as ISO-8859-1, which turns `12,99 zł` into `12,99 zÅ‚` on screen — the build
+> file uses a `Reader` for precisely this reason.
+
+---
+
+## 6. Running it
 
 ```bash
 ./gradlew :app:assembleDebug
@@ -286,7 +332,7 @@ adb shell am start -a android.intent.action.VIEW \
 
 ---
 
-## 6. Before release
+## 7. Before release
 
 - [ ] Fix SMTP (section 2) — signup is broken without it
 - [x] Google **Android** OAuth client (section 3)
@@ -294,6 +340,10 @@ adb shell am start -a android.intent.action.VIEW \
 - [ ] `supabase config push` to enable the Google provider remotely (section 3)
 - [ ] Publish the Google OAuth consent screen to Production (section 3)
 - [ ] Confirm the AdMob unit `…/2703686934` is of type **Interstitial** (section 4)
+- [x] Create and activate the one-time product `no.ads.forever` (section 5)
+- [ ] Run the purchase matrix from Play, with licence testers (section 5)
+- [ ] Clear `REMOVE_ADS_PLACEHOLDER_PRICE` from `local.properties` before believing a
+      pre-release build's upsell (section 5) — it is debug-only, but it is also a lie
 - [ ] Publish the privacy policy at `https://idct.tech/whaaack/privacy` (linked from About)
 - [ ] Create a release keystore, add its SHA-1 to the Google Android OAuth client
 - [ ] Bump `versionCode` / `versionName` in `app/build.gradle.kts`

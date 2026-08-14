@@ -1,12 +1,16 @@
 package tech.idct.whaaack.data
 
 import android.content.Context
+import android.util.Log
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.map
+import java.io.IOException
 
 data class Preferences(
     val sound: Boolean = true,
@@ -27,7 +31,17 @@ class GameSettings(private val context: Context) {
     private val keyParallax = booleanPreferencesKey("parallax")
     private val keyBest = longPreferencesKey("local_best")
 
-    val flow: Flow<Preferences> = context.settingsDataStore.data.map { prefs ->
+    /** Same crash-proofing as [EntitlementStore.flow], for the same reason. */
+    val flow: Flow<Preferences> = context.settingsDataStore.data
+        .catch { cause ->
+            if (cause is IOException) {
+                Log.w("GameSettings", "unreadable, falling back to defaults", cause)
+                emit(emptyPreferences())
+            } else {
+                throw cause
+            }
+        }
+        .map { prefs ->
         Preferences(
             sound = prefs[keySound] ?: true,
             music = prefs[keyMusic] ?: true,

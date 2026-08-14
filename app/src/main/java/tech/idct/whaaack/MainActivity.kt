@@ -45,6 +45,7 @@ import kotlinx.coroutines.launch
 import tech.idct.whaaack.audio.AudioEngine
 import tech.idct.whaaack.data.BoardScope
 import tech.idct.whaaack.ui.AboutScreen
+import tech.idct.whaaack.ui.AdBreakDialog
 import tech.idct.whaaack.ui.AuthScreen
 import tech.idct.whaaack.ui.ForgotPasswordScreen
 import tech.idct.whaaack.ui.GameOverScreen
@@ -304,6 +305,16 @@ private fun WhaaackApp(vm: WhaaackViewModel, onGoogleSignIn: () -> Unit) {
                 Screen.ABOUT -> AboutScreen(onBack = { vm.go(Screen.SETTINGS) })
 
                 Screen.GAME -> Unit
+            }
+
+            // Above every screen, because the navigation that raised it is waiting behind it.
+            if (state.adPrompt) {
+                AdBreakDialog(
+                    price = state.removeAdsPrice.orEmpty(),
+                    onBuy = { vm.buyRemoveAdsFromAdBreak(activity) },
+                    onContinue = { vm.continueThroughAdBreak(activity) },
+                    onCancel = { vm.cancelAdBreak() },
+                )
             }
 
             Toast(state.toast) { vm.consumeToast() }

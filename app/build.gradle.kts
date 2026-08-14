@@ -13,7 +13,11 @@ plugins {
  */
 val secrets = Properties().apply {
     val f = rootProject.file("local.properties")
-    if (f.exists()) f.inputStream().use { load(it) }
+    // Read through a UTF-8 Reader, not the raw stream: `Properties.load(InputStream)` is
+    // specified as ISO-8859-1, so any non-ASCII value arrives mojibake — which a localised
+    // placeholder price (`12,99 zł`) demonstrates immediately. Every key here is ASCII today
+    // and ASCII is a subset of UTF-8, so nothing else changes.
+    if (f.exists()) f.reader(Charsets.UTF_8).use { load(it) }
 }
 
 fun secret(key: String, default: String = ""): String =
@@ -84,16 +88,25 @@ android {
             "\"${secret("GOOGLE_WEB_CLIENT_ID")}\"",
         )
 
-        // The one-time "remove ads" product, as created in the Play Console. The id below is
-        // a placeholder: the product does not exist yet, so Play answers the lookup with
-        // ITEM_UNAVAILABLE and BillingManager reports the store as simply having nothing to
-        // sell. The button hides itself in that state, so shipping before the product is
-        // created is safe — set the real id here (or in local.properties) when it exists.
+        // The one-time "remove ads" product — "Whaaack the ads!" — as it exists in the Play
+        // Console: a one-time product `no.ads.forever` with a single active, *backwards
+        // compatible* purchase option (`no-ads-forever-buy`). Backwards compatible is the
+        // part that matters to the code: it is what keeps the legacy singular offer visible
+        // through `oneTimePurchaseOfferDetails`, which is where BillingManager reads the
+        // price and how `launchPurchase` can pass no offer token.
+        //
+        // Ids are permanent in the console and cannot be reused after deletion, so this
+        // string is not a thing to tidy up later. An id that does not resolve is not a crash:
+        // Play answers ITEM_UNAVAILABLE, BillingManager reports the store as having nothing
+        // to sell, and every upsell hides itself.
         buildConfigField(
             "String",
             "REMOVE_ADS_PRODUCT_ID",
-            "\"${secret("REMOVE_ADS_PRODUCT_ID", "whaaack_remove_ads")}\"",
+            "\"${secret("REMOVE_ADS_PRODUCT_ID", "no.ads.forever")}\"",
         )
+
+        // Empty in release, always — the debug build type is the only place this is filled in.
+        buildConfigField("String", "REMOVE_ADS_PLACEHOLDER_PRICE", "\"\"")
     }
 
     signingConfigs {
@@ -116,6 +129,23 @@ android {
                 "String",
                 "ADMOB_INTERSTITIAL_AD_UNIT_ID",
                 "\"ca-app-pub-3940256099942544/1033173712\"",
+            )
+
+            // Play Billing will not price a product for a build it did not install: a
+            // sideloaded debug APK gets SERVICE_DISCONNECTED or ITEM_UNAVAILABLE, so
+            // `removeAdsPrice` stays null, and every upsell — the Home row, the Settings row
+            // and the ad-break dialog — correctly hides itself. That is right in production
+            // and useless while building the screens, so a debug build may stand a price in.
+            //
+            // Set REMOVE_ADS_PLACEHOLDER_PRICE in local.properties (git-ignored) to any
+            // display string, e.g. `REMOVE_ADS_PLACEHOLDER_PRICE=12,99 zł`. Blank by default,
+            // so a plain debug build behaves exactly like a release one. The purchase itself
+            // is *not* faked: tapping through reaches Play, which declines, which is the
+            // honest half of the flow and the half worth seeing fail.
+            buildConfigField(
+                "String",
+                "REMOVE_ADS_PLACEHOLDER_PRICE",
+                "\"${secret("REMOVE_ADS_PLACEHOLDER_PRICE", "")}\"",
             )
         }
         release {

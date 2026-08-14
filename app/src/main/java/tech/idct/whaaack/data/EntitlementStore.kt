@@ -1,15 +1,19 @@
 package tech.idct.whaaack.data
 
 import android.content.Context
+import android.util.Log
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import java.io.IOException
 
 /**
  * What the player has paid for.
@@ -56,7 +60,27 @@ class EntitlementStore(private val context: Context) {
     private val keyCheckCode = intPreferencesKey("last_check_code")
     private val keyOrderId = stringPreferencesKey("order_id")
 
-    val flow: Flow<Entitlements> = context.entitlementDataStore.data.map { prefs ->
+    /**
+     * A read error is reported as an empty store rather than thrown.
+     *
+     * `DataStore.data` is documented to emit `IOException` when the file cannot be read — a
+     * truncated write from a battery pull, a corrupt block — and every collector here is a
+     * `viewModelScope.launch` with no catch, so the exception would surface as a crash on
+     * launch. That is the worst possible response: the file that failed to parse is the one
+     * that says the player paid, and a crash loop leaves them unable to reach the Restore
+     * button that would fix it. Empty means "not owned yet", the entitlement is re-granted by
+     * the next successful Play query, and the app stays usable in the meantime.
+     */
+    val flow: Flow<Entitlements> = context.entitlementDataStore.data
+        .catch { cause ->
+            if (cause is IOException) {
+                Log.w("EntitlementStore", "unreadable, treating as empty", cause)
+                emit(emptyPreferences())
+            } else {
+                throw cause
+            }
+        }
+        .map { prefs ->
         Entitlements(
             adsRemoved = prefs[keyAdsRemoved] ?: false,
             verifiedOwnedAtMs = prefs[keyVerifiedAt] ?: 0L,

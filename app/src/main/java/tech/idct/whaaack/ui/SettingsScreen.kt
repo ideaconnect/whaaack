@@ -36,6 +36,7 @@ import tech.idct.whaaack.BuildConfig
 import tech.idct.whaaack.UiState
 import tech.idct.whaaack.ui.theme.AccentInk
 import tech.idct.whaaack.ui.theme.Cream
+import tech.idct.whaaack.ui.theme.CreamDim
 import tech.idct.whaaack.ui.theme.DangerSoft
 import tech.idct.whaaack.ui.theme.Hairline
 
@@ -129,7 +130,9 @@ fun SettingsScreen(
                 ActionRow(
                     "Restore purchases",
                     "Already bought ad-free? Get it back here",
-                    onRestorePurchases,
+                    busy = state.restoringPurchases,
+                    busyHint = "Checking with Google Play…",
+                    onClick = onRestorePurchases,
                 )
 
                 if (privacyOptionsRequired) {
@@ -138,7 +141,7 @@ fun SettingsScreen(
                     ActionRow(
                         "Ad privacy options",
                         "Change your consent for personalised ads",
-                        onPrivacyOptions,
+                        onClick = onPrivacyOptions,
                     )
                 }
 
@@ -332,22 +335,45 @@ private fun SectionLabel(text: String, color: Color = Color(0xB3FFF3E6)) {
 }
 
 @Composable
-private fun ActionRow(label: String, hint: String, onClick: () -> Unit) {
+private fun ActionRow(
+    label: String,
+    hint: String,
+    /**
+     * Set while the row's action is in flight. Measured on a device with Play unreachable,
+     * "Restore purchases" takes the better part of ten seconds to answer — and it is the
+     * control a player reaches for when they have paid and the app disagrees, so silence for
+     * that long reads as a dead button and gets tapped again and again, each tap queueing
+     * another billing pass behind the same mutex and another toast behind that.
+     */
+    busy: Boolean = false,
+    busyHint: String = hint,
+    onClick: () -> Unit,
+) {
     Row(
         Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(18.dp))
             .background(Color(0x57140A1A))
             .border(1.dp, Hairline, RoundedCornerShape(18.dp))
-            .clickableOnce(true, onClick)
+            .clickableOnce(!busy, onClick)
             .padding(horizontal = 16.dp, vertical = 15.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Text(label, color = Cream, fontSize = 14.sp, fontWeight = FontWeight.Black)
-            Text(hint, color = Color(0x9EFFF3E6), fontSize = 11.sp)
+            Text(
+                label,
+                color = if (busy) CreamDim else Cream,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Black,
+            )
+            Text(if (busy) busyHint else hint, color = Color(0x9EFFF3E6), fontSize = 11.sp)
         }
-        Text("›", color = Color(0x9EFFF3E6), fontSize = 18.sp, fontWeight = FontWeight.Black)
+        Text(
+            if (busy) "…" else "›",
+            color = Color(0x9EFFF3E6),
+            fontSize = 18.sp,
+            fontWeight = FontWeight.Black,
+        )
     }
 }
 

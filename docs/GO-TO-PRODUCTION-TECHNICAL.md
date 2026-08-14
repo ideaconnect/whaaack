@@ -186,11 +186,11 @@ artifact, and until there is one, nothing below it has actually been exercised.
 
 - [x] **Ship an `.aab`, not an `.apk`** — **done; splits left at bundletool defaults, deliberately**
   Play has required App Bundles for new apps since Aug 2021, so `bundleRelease` is the upload
-  artifact — nothing in the repo mentions it; SETUP.md §5 documents only `assembleDebug`. The
+  artifact — nothing in the repo mentions it; SETUP.md §6 documents only `assembleDebug`. The
   bundle's `BundleConfig.pb` has an empty `splits_config`, so bundletool defaults apply (ABI,
   density and language splits all on), which is right here. Language splits deserve a note: the
   app ships only English `values/`, while Compose and GMS contribute ~410 KB of translations Play
-  will split per locale. Add the release command to SETUP.md §5. One verified non-issue — the AAB
+  will split per locale. Add the release command to SETUP.md §6. One verified non-issue — the AAB
   already embeds `BUNDLE-METADATA/…/proguard.map`, so Play deobfuscates crashes with no upload
   step.
 
@@ -1028,20 +1028,39 @@ The console side of both — ad unit types, COPPA flags, creating the product �
   form still appears once before Play confirms ownership — unavoidable given the deliberate design.
 
 - [ ] **Handle interstitial expiry and persist the cap** ⚪
-  Load failure, no-fill and offline are all handled correctly — verified path by path. Three
-  refinements: a cached interstitial expires after about an hour and `ad` is held indefinitely with
-  no timestamp, so one preloaded at launch and offered after a long session always fails to show
-  (handled gracefully, but the impression is wasted) — record `loadedAtMs` and discard past ~50
-  minutes; call `preload()` from `onAppResumed()` so returning from background refills a slot that
-  expired or was never filled offline; and persist `lastShownAtMs` so the two-minute cap survives
-  process death. Also consider skipping the very first ad of a fresh install — a new player who
-  finishes a thirty-second first run and immediately gets a full-screen ad is the churn case
-  Google's own guidance warns about.
+  Load failure, no-fill and offline are all handled correctly — verified path by path. One of the
+  three refinements is now done: `onAppResumed()` calls `preload()`, so returning from background
+  refills a slot that expired or was never filled offline, and a session that began without a
+  network is no longer adless for its whole life. Two remain. A cached interstitial expires after
+  about an hour and `ad` is held indefinitely with no timestamp, so one preloaded at launch and
+  offered after a long session always fails to show — handled gracefully, but the impression is
+  wasted, and post-ad-break it now also means the player was shown a purchase prompt in front of
+  an ad that could never play. Record `loadedAtMs`, and treat a stale ad as absent in *both*
+  `wouldShow()` and `showThen()` so the two cannot disagree. Separately, persist `lastShownAtMs`
+  so the two-minute cap survives process death. Also consider skipping the very first ad of a
+  fresh install — a new player who finishes a thirty-second first run and immediately gets a
+  full-screen ad is the churn case Google's own guidance warns about.
 
-- [ ] **Pin `REMOVE_ADS_PRODUCT_ID` explicitly and document billing in SETUP.md** 🟡
-  Add it to `local.properties` (and to CI) so the shipped id cannot silently diverge from the
-  console. SETUP.md has no billing section at all and its checklist has zero billing items; add
-  one covering the product id, the licence-tester list, and the refund/revoke runbook.
+- [ ] **Decide how strictly the ad break is enforced** 🟡
+  Two ways past an interstitial exist, and they are a single product decision rather than two
+  bugs. (1) The predictive-back gesture on the game-over screen goes to Home through
+  `WhaaackViewModel.onBack()`, which never consults `AdsManager` — one gesture, no ad, and it
+  predates the ad-break dialog. (2) Tapping **Remove ads** in the dialog releases the pending
+  navigation immediately, so a player who opens Play's sheet and cancels it has skipped that ad;
+  neither the loaded ad nor the two-minute cap is consumed, so the same move works at every
+  transition. Both were confirmed by review and left deliberately: closing (2) alone is theatre
+  while (1) exists, and the obvious fix for (2) — hold the navigation until the purchase resolves
+  — either shows an interstitial to someone in the act of paying to remove ads, or strands a
+  PENDING purchase on the game-over screen. The coherent options are to accept both (ads shown
+  only on an explicit button tap, which is the current behaviour), or to close both together by
+  routing the GAME_OVER back case through `withAd` and keeping `afterAdBreak` until billing
+  answers. Do not close one and not the other.
+
+- [ ] **Document billing in SETUP.md** 🟡
+  The id itself is settled: `REMOVE_ADS_PRODUCT_ID` now defaults to the real `no.ads.forever`,
+  which is what ships since `local.properties` does not override it. What is still missing is
+  documentation — SETUP.md has no billing section at all and its checklist has zero billing
+  items; add one covering the product id, the licence-tester list, and the refund/revoke runbook.
 
 - [ ] **Run the whole purchase flow on the internal track with licence testers** 🔴
   Billing has never been exercised against real Play — every path below is unproven on a device,
@@ -1056,13 +1075,16 @@ The console side of both — ad unit types, COPPA flags, creating the product �
   drops only after two verified-online negatives; (f) airplane mode while holding it → stays
   ad-free. To re-test a purchase you must refund+revoke, since the app never consumes it.
 
-- [ ] **Confirm the offer model matches `launchPurchase`** 🟡
-  `launchPurchase` passes no `setOfferToken` and the price reads the singular, backwards-compatible
-  `oneTimePurchaseOfferDetails`. Keep the product to a single plain "buy" purchase option so Play
-  exposes a backwards-compatible offer. If the console model produces offers with no
-  backwards-compatible entry, the singular accessor returns null and the button silently never
-  appears — the fix then is to read `oneTimePurchaseOfferDetailsList`, take the intended offer, and
-  pass its token.
+- [x] **Confirm the offer model matches `launchPurchase`** ✅
+  Satisfied by how the product was built: `no.ads.forever` has exactly one purchase option,
+  `no-ads-forever-buy`, of type Buy, and the console marks it **backwards compatible**. That is
+  precisely the condition the client needs — `launchPurchase` passes no `setOfferToken` and the
+  price reads the singular `oneTimePurchaseOfferDetails`, which is populated only for a
+  backwards-compatible offer. Still unproven *on a device* until the internal-track run below;
+  and if a second purchase option is ever added, re-check this first: the singular accessor would
+  return null, and the upsell would silently stop appearing rather than fail loudly. The fix in
+  that case is to read `oneTimePurchaseOfferDetailsList`, pick the intended offer, and pass its
+  token.
 
 - [ ] **Verify acknowledgement live** 🟡
   Verified in source: the code **does** acknowledge, from both paths that can see a purchase, with
