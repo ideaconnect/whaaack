@@ -1,0 +1,98 @@
+name: Pages
+
+# Publishes website/ to GitHub Pages as a PROJECT page under the ideaconnect org's
+# apex custom domain, served at https://idct.tech/whaaack/.
+#
+# The site is plain static HTML — no Jekyll, no build step — so this workflow only
+# checks the tree is sound and hands website/ straight to Pages.
+#
+# One-time setup (already done on this repo): Settings → Pages → Source: GitHub
+# Actions, and the custom-domain field left BLANK. The project inherits the org's
+# apex domain, configured on the ideaconnect.github.io page repo, and serves under
+# the /whaaack/ path. See the "no CNAME" step below for why that field must stay
+# empty.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - website/**
+      - .github/workflows/pages.yml
+  # Runs on PRs too, so a broken site is caught before it reaches the domain.
+  # Nothing is uploaded or deployed from a PR — see the `if` guards below.
+  pull_request:
+    paths:
+      - website/**
+      - .github/workflows/pages.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One deployment at a time, and never cancel a publish that is already running.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      # The privacy policy and terms have to stay reachable at a stable URL —
+      # Google Play requires an active, publicly accessible, non-PDF policy URL,
+      # and the app links these pages directly from its About screen. A rename
+      # that quietly 404s one of them is a store-review failure, so assert the
+      # structure rather than discovering it later.
+      - name: Verify required pages exist
+        run: |
+          missing=0
+          for f in \
+            website/index.html \
+            website/privacy/index.html \
+            website/terms/index.html \
+            website/delete-account/index.html \
+            website/contact/index.html \
+            website/contact/thanks/index.html \
+            website/assets/css/site.css \
+            website/assets/js/site.js
+          do
+            if [ ! -f "$f" ]; then echo "::error::missing $f"; missing=1; fi
+          done
+          exit $missing
+
+      # The contact form redirects here after a successful submit, and Web3Forms
+      # sends the visitor to whatever absolute URL is baked into the form. If the
+      # two ever drift the player lands on a 404 having just been told the message
+      # was sent.
+      - name: Verify the contact form redirect matches the thanks page
+        run: |
+          grep -q 'value="https://idct.tech/whaaack/contact/thanks/"' website/contact/index.html \
+            || { echo "::error::contact form redirect does not point at /whaaack/contact/thanks/"; exit 1; }
+
+      # A project page under the org's apex domain must NOT ship a CNAME: one would
+      # claim idct.tech at its root and collide with the org page that owns it.
+      - name: Verify no project CNAME
+        run: test ! -f website/CNAME
+
+      - uses: actions/configure-pages@v6
+
+      - name: Upload Pages artifact
+        if: github.ref == 'refs/heads/main'
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: website
+
+  deploy:
+    needs: build
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v5
