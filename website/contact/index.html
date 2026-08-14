@@ -55,8 +55,9 @@
     <div class="callout">
       <p>
         <strong>Privacy or account requests</strong> (access, correction, deletion, a copy of
-        your data) are handled here too. Say which app account the request is about — the
-        email address you signed up with is enough. See the
+        your data) are handled here too. Say which app account the request is about and give the
+        email address it uses. Anything typed into a form proves nothing on its own, so we reply
+        to that address first and act only once you have answered. See the
         <a href="/whaaack/privacy/">privacy policy</a> for what we hold and for how long.
       </p>
     </div>
@@ -98,9 +99,13 @@
     </form>
 
     <p class="updated" style="margin-top:22px">
-      The form is delivered by Web3Forms, which processes your message on our behalf and does
-      not use it for anything else. A plain <code>POST</code> is used rather than a background
-      request so the honest thing happens if JavaScript is off: the message still sends.
+      The form is delivered by Web3Forms, a processor acting on our instructions. The “confirm
+      you are human” box is hCaptcha, run by Intuition Machines: your browser loads it from
+      <code>js.hcaptcha.com</code> the moment this page opens, so it sees your IP address and
+      browser signals whether or not you send anything. With JavaScript on, the submit is
+      intercepted and sent in the background, so a rejected message is reported here instead of
+      leaving you on a page of raw JSON. With JavaScript off the form posts to Web3Forms
+      directly and still sends.
     </p>
   </div>
 </main>

@@ -107,7 +107,10 @@
         <tr>
           <td>Advertising ID and ad-related device signals</td>
           <td>To show ads, and — only if you agree — to personalise them and measure them.</td>
-          <td>Art. 6(1)(a) — your consent, collected through Google's consent form. Withdrawable at any time.</td>
+          <td>Art. 6(1)(a) — your consent, collected through Google's consent form wherever that
+          form is required, which covers the EEA and the UK; there you can withdraw it at any
+          time. Where the form is not required, no consent is collected and ads are served
+          without it.</td>
           <td>Per Google's own retention; see their policy linked below.</td>
         </tr>
         <tr>
@@ -135,8 +138,14 @@
     <h3>What stays on your device and never reaches us</h3>
     <ul>
       <li>Your sound, music, haptics and parallax settings.</li>
-      <li>Your best <em>casual</em> score — casual play is entirely offline and is never sent anywhere.</li>
-      <li>Your sign-in session token, so you are not asked to log in every time. It is deliberately excluded from Android cloud backup and from device-to-device transfer.</li>
+      <li>Your best time on this device, set by any run — ranked or casual. Casual play is
+      entirely offline and is never sent anywhere; a ranked run separately posts its score to
+      the leaderboard.</li>
+      <li>Your sign-in session, so you are not asked to log in every time: the access and
+      refresh tokens, plus a local copy of your account id, email address, display name and
+      sign-in method, which is what lets the app greet you before the network answers. All of
+      it is deliberately excluded from Android cloud backup and from device-to-device
+      transfer, so a restored backup cannot carry your session onto another phone.</li>
     </ul>
 
     <h2 id="ads">3. Ads, and your control over them</h2>
@@ -144,11 +153,12 @@
     one full-screen interstitial between runs, capped to roughly one every couple of minutes.
     There are no ads during a run and none on launch.</p>
 
-    <p>Before any ad is requested, the app shows Google's consent form via the
-    <strong>User Messaging Platform</strong>, a Google-certified consent management platform
-    operating under the IAB Transparency &amp; Consent Framework. That form is where you allow
-    or refuse personalised advertising, and where you can see every advertising partner
-    involved.</p>
+    <p>Where Google's platform decides a consent form is required — in practice the EEA and
+    the UK — the app shows it before any ad is requested, via the <strong>User Messaging
+    Platform</strong>, a Google-certified consent management platform operating under the IAB
+    Transparency &amp; Consent Framework. That form is where you allow or refuse personalised
+    advertising, and where you can see every advertising partner involved. Where Google's
+    framework does not require a form, none is shown and no consent is collected.</p>
 
     <p>Two separate rules apply and we treat both as requiring your agreement:</p>
     <ul>
@@ -160,10 +170,12 @@
       which replaced the old art. 173 Prawa telekomunikacyjnego.</li>
     </ul>
 
-    <p>If you refuse, you still get the game and you still get ads — just non-personalised ones.
-    <strong>You can change your mind whenever you like</strong>, in the app under
-    <em>Settings → Ad privacy options</em>. If you would rather have none at all, the
-    <a href="/whaaack/#adfree">ad-free unlock</a> removes them permanently.</p>
+    <p>You get the game either way. If you allow the device storage that ads need but refuse
+    personalisation, you still get ads — just non-personalised ones. If you refuse everything,
+    the app requests no ads at all. <strong>You can change your mind whenever you like</strong>:
+    wherever Google's form applies to you, the app's <em>Settings</em> carries an <em>Ad privacy
+    options</em> row that reopens it. If you would rather have none at all, the
+    <a href="/whaaack/#adfree">ad-free unlock</a> removes them.</p>
 
     <p>The app requests the Android advertising ID (<code>AD_ID</code> permission). The Google
     Mobile Ads SDK also adds the Android Privacy Sandbox permissions
@@ -181,11 +193,24 @@
       controller for the sign-in event itself. We receive only the email and name from the
       token.</li>
       <li><strong>Google Play</strong> — distribution and payments. For purchases in the EEA,
-      Google is the seller of record.</li>
+      Google is the seller of record. When you buy the ad-free unlock while signed in, the app
+      sends Google a one-way scrambled form of your account id with the order — Google asks for
+      it to spot fraud, it cannot be turned back into your id, and it is never your email
+      address.</li>
       <li><strong>Web3Forms</strong> — delivers messages from the contact form. A processor.</li>
-      <li><strong>The public</strong> — your <em>display name</em> and your best ranked score are
-      shown on a leaderboard that anyone can read. Your email is never shown. Choose a display
-      name you are comfortable being public; you can change it once every 30 days.</li>
+      <li><strong>Intuition Machines (hCaptcha)</strong> — the "confirm you are human" box on the
+      contact page. Your browser loads it from <code>js.hcaptcha.com</code> as soon as that page
+      opens, so it sees your IP address and browser signals whether or not you send the form.</li>
+      <li><strong>Resend</strong> — delivers the emails the account itself needs: confirmation,
+      password reset and address changes. It processes your email address and the contents of
+      those messages on our instructions.</li>
+      <li><strong>GitHub</strong> — hosts this website on GitHub Pages, and its servers log the IP
+      address of every visitor as part of serving it.</li>
+      <li><strong>The public</strong> — anyone can read the leaderboards, signed in or not. A row
+      shows your <em>display name</em>, your best ranked score and the date you set it, and the
+      response also carries the internal account id your scores are stored against. Your email
+      address is never included. Choose a display name you are comfortable being public; you can
+      change it once every 30 days.</li>
     </ul>
     <p>We do not sell your data, and we do not use it for advertising profiles of our own.</p>
 
@@ -204,7 +229,10 @@
       <li>deletes your authentication user, so the email address is gone;</li>
       <li>deletes your profile row, so the display name is gone and freed for someone else;</li>
       <li>deletes every score you have ever recorded, so you disappear from the leaderboards;</li>
-      <li>clears the best score stored locally on the device, so nothing survives on the phone either.</li>
+      <li>clears the best score and the sign-in session held on the device, so the account is
+      gone from the phone too. Your sound and display settings stay, and so does the record of
+      an ad-free purchase — that one belongs to your Google Play account, not to this one, and
+      deleting a Whaaack! account does not undo a purchase or refund it.</li>
     </ul>
     <p>It is immediate and irreversible. There is no deactivated state, no grace period and no
     way for us to undo it. Encrypted backups may retain traces for a short period before

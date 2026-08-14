@@ -68,6 +68,18 @@ surfaces disagree about what they will do to it:
 `--preview` writes `tools/icon-preview.png`: every mask shape at every launcher size, plus
 the themed icon in light and dark. Worth a look before shipping an icon change.
 
+The gold crown badge on the ad-break dialog has its own master and its own one-job script:
+
+```bash
+python tools/generate_pro_badge.py --preview
+```
+
+`assets/icon/pro_remove_ads_crown_only.png` is painted on an *opaque* dark ground, which
+would show as a square tile in the middle of a translucent panel. The script solves the
+composite that produced it — every lit pixel is one flat gold at some opacity — and puts the
+crown *and its glow* back on transparency, rather than cutting it out at a threshold and
+throwing the glow away.
+
 ## Layout
 
 ```
@@ -77,6 +89,7 @@ app/src/main/java/tech/idct/whaaack/
   data/     Supabase client, auth, leaderboard, settings
   audio/    SoundPool effects + MediaPlayer music
   ads/      AdMob interstitial, UMP consent
+  billing/  the one-time ad-free unlock (Play Billing)
 supabase/
   migrations/   schema, RLS, leaderboard functions
   config.toml   remote auth settings
@@ -92,6 +105,24 @@ docs/GO-TO-PRODUCTION-NON-TECHNICAL.md  what is left in a console or a contract
 [idct.tech/whaaack/](https://idct.tech/whaaack/) — the landing page plus the privacy policy,
 terms, account-deletion page and contact form. Plain static HTML, no framework and no build
 step, in [website/](website/).
+
+Everything the site shows of the game is **the game**, not a mockup: the hero video and the
+four screenshots in the fan are cut from one recorded run.
+
+```bash
+python tools/capture_gameplay.py
+```
+
+It drives the run itself — reads the screen, finds the fullest hole, taps it — because a
+recording of an idle board is worse than a still. Re-run it whenever the game's look
+changes. The script's header lists the four traps worth knowing about first, including why
+`screenrecord` needs an explicit `--size` and why pulling the file too early yields a video
+no player will open.
+
+The only third-party thing on the page is nothing at all: no fonts, no icon CDN, no
+analytics. The Google Play mark is an inline SVG for that reason — every host the site
+touches is a recipient of the visitor's data and has to be named in the privacy policy,
+which is why the deploy workflow fails the build on an undeclared one.
 
 It is a GitHub Pages **project** page served under the org's apex domain, which is the one
 thing worth knowing before editing it: the site must never ship a `CNAME` (that would claim
@@ -115,6 +146,12 @@ Put your Android SDK path and Supabase keys in `local.properties`
 ```
 
 Debug builds use Google's test ad unit, so local runs never touch live inventory.
+
+Play refuses to price an in-app product for a build it did not install, so on a sideloaded
+debug APK there is nothing to sell and every ad-free upsell hides itself — correctly, but
+unhelpfully if you are working on those screens. Set `REMOVE_ADS_PLACEHOLDER_PRICE` in
+`local.properties` to stand a price in; the purchase itself still goes to Play and still gets
+declined. See [docs/SETUP.md](docs/SETUP.md) §5.
 
 ## Status
 

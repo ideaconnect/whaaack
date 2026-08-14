@@ -139,3 +139,287 @@
   var year = document.querySelector('[data-year]');
   if (year) year.textContent = new Date().getFullYear();
 })();
+
+/* ==================================================================================
+   Motion and the playable board.
+
+   Appended rather than woven into the block above so the original behaviour — reveals,
+   orchard parallax, scattered fruit, the contact form — stays exactly as it was. Same
+   rules apply here: nothing below is required to read the page, and everything that
+   moves checks prefers-reduced-motion first.
+   ================================================================================== */
+
+(function () {
+  'use strict';
+
+  var reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  // ---- scroll progress ------------------------------------------------------------
+
+  var bar = document.querySelector('.scroll-progress span');
+  if (bar && !reduced) {
+    var barTicking = false;
+    var drawBar = function () {
+      var doc = document.documentElement;
+      var max = doc.scrollHeight - window.innerHeight;
+      bar.style.setProperty('--p', max > 0 ? (window.scrollY / max).toFixed(4) : 0);
+      barTicking = false;
+    };
+    window.addEventListener('scroll', function () {
+      if (barTicking) return;
+      barTicking = true;
+      window.requestAnimationFrame(drawBar);
+    }, { passive: true });
+    drawBar();
+  }
+
+  // ---- count up -------------------------------------------------------------------
+  // The stats already contain their final value in the markup, so with JS off — or once
+  // this has run — they are simply correct. This only animates the way in.
+
+  var counters = document.querySelectorAll('[data-count]');
+  if (counters.length && 'IntersectionObserver' in window && !reduced) {
+    var countIo = new IntersectionObserver(function (entries) {
+      entries.forEach(function (entry) {
+        if (!entry.isIntersecting) return;
+        var el = entry.target;
+        countIo.unobserve(el);
+        var target = parseInt(el.getAttribute('data-count'), 10);
+        if (!isFinite(target)) return;
+        var started = null;
+        var step = function (now) {
+          if (started === null) started = now;
+          var t = Math.min((now - started) / 900, 1);
+          // Ease out, so it lands rather than stops.
+          el.textContent = Math.round(target * (1 - Math.pow(1 - t, 3)));
+          if (t < 1) window.requestAnimationFrame(step);
+        };
+        window.requestAnimationFrame(step);
+      });
+    }, { threshold: 0.6 });
+    counters.forEach(function (el) { countIo.observe(el); });
+  }
+
+  // ---- pointer tilt ---------------------------------------------------------------
+  // Only for a fine pointer: on a touch screen there is no hover, and the tilt would
+  // either never fire or fire once and stick.
+
+  var tilts = document.querySelectorAll('[data-tilt]');
+  if (tilts.length && !reduced && window.matchMedia('(hover: hover) and (pointer: fine)').matches) {
+    tilts.forEach(function (el) {
+      var reset = function () {
+        el.style.setProperty('--rx', '0deg');
+        el.style.setProperty('--ry', '0deg');
+      };
+      el.addEventListener('pointermove', function (event) {
+        var box = el.getBoundingClientRect();
+        var x = (event.clientX - box.left) / box.width - 0.5;
+        var y = (event.clientY - box.top) / box.height - 0.5;
+        el.style.setProperty('--rx', (-y * 9).toFixed(2) + 'deg');
+        el.style.setProperty('--ry', (x * 11).toFixed(2) + 'deg');
+      });
+      el.addEventListener('pointerleave', reset);
+      reset();
+    });
+  }
+
+  // ---- the hero video -------------------------------------------------------------
+  // Autoplay is in the markup so it starts without waiting for this file. All this does
+  // is stop it when it is off screen: a looping video decoding behind three sections of
+  // text is a battery cost with nothing on the other side of it.
+
+  var hero = document.querySelector('.phone-video video');
+  if (hero && 'IntersectionObserver' in window) {
+    if (reduced) {
+      hero.removeAttribute('autoplay');
+      hero.pause();
+    } else {
+      new IntersectionObserver(function (entries) {
+        entries.forEach(function (entry) {
+          if (entry.isIntersecting) {
+            // play() rejects when the tab is hidden or autoplay is blocked; the poster
+            // stays up in that case, which is a fine outcome and not worth logging.
+            var playing = hero.play();
+            if (playing && playing.catch) playing.catch(function () {});
+          } else {
+            hero.pause();
+          }
+        });
+      }, { threshold: 0.15 }).observe(hero);
+    }
+  }
+
+  // ---- the screenshot fan ---------------------------------------------------------
+  // --fan goes 0 (a closed deck) to 1 (spread) as the rail crosses the middle of the
+  // viewport. CSS defaults it to 1, so without this the fan is simply open.
+
+  var fan = document.querySelector('[data-fan]');
+  if (fan && !reduced) {
+    var fanTicking = false;
+    var drawFan = function () {
+      var box = fan.getBoundingClientRect();
+      var centre = box.top + box.height / 2;
+      // 0 when the fan's middle is a full viewport below the centre line, 1 at it.
+      var progress = 1 - Math.abs(centre - window.innerHeight / 2) / (window.innerHeight * 0.9);
+      fan.style.setProperty('--fan', Math.max(0, Math.min(1, progress)).toFixed(3));
+      fanTicking = false;
+    };
+    window.addEventListener('scroll', function () {
+      if (fanTicking) return;
+      fanTicking = true;
+      window.requestAnimationFrame(drawFan);
+    }, { passive: true });
+    window.addEventListener('resize', drawFan, { passive: true });
+    drawFan();
+  }
+
+  // ---- the playable board ---------------------------------------------------------
+  //
+  // A toy of the real thing, and deliberately a toy: sixteen holes, fruit that rise and
+  // duck back down, three escapes and it is over, and the score is the milliseconds it
+  // lasted. What it does not do is the game's speed curve — it steps up gently and stops,
+  // because the point here is to explain the rule in ten seconds, not to beat a visitor.
+  //
+  // Built entirely from JS so that a browser without it sees no half-built board.
+
+  var board = document.querySelector('[data-demo-board]');
+  var startBtn = document.querySelector('[data-demo-start]');
+  if (board && startBtn) {
+    var FRUITS = ['strawberry', 'apple', 'watermelon', 'lemon', 'grape', 'kiwi',
+                  'orange', 'pear', 'cherry', 'banana', 'peach', 'pineapple'];
+    var HOLES = 16;
+    var MAX_STRIKES = 3;
+
+    var demo = document.getElementById('demo');
+    var msOut = document.querySelector('[data-demo-ms]');
+    var hitsOut = document.querySelector('[data-demo-hits]');
+    var strikeOut = document.querySelector('[data-demo-strikes]');
+    var hint = document.querySelector('[data-demo-hint]');
+
+    var holes = [];
+    for (var i = 0; i < HOLES; i++) {
+      var hole = document.createElement('button');
+      hole.type = 'button';
+      hole.className = 'hole';
+      hole.setAttribute('aria-label', 'Hole ' + (i + 1));
+      var fruit = document.createElement('img');
+      fruit.className = 'fruit';
+      fruit.alt = '';
+      fruit.src = 'assets/img/fruits/apple.png';
+      var splat = document.createElement('img');
+      splat.className = 'splat';
+      splat.alt = '';
+      splat.src = 'assets/img/splats/splat0.png';
+      hole.appendChild(fruit);
+      hole.appendChild(splat);
+      board.appendChild(hole);
+      holes.push({ el: hole, fruit: fruit, splat: splat, timer: 0, live: false });
+    }
+
+    var running = false;
+    var startedAt = 0;
+    var hits = 0;
+    var strikes = 0;
+    var clock = 0;
+    var spawner = 0;
+
+    var paint = function () {
+      strikeOut.innerHTML = '';
+      for (var s = 0; s < MAX_STRIKES; s++) {
+        var dot = document.createElement('i');
+        if (s < strikes) dot.className = 'out';
+        strikeOut.appendChild(dot);
+      }
+      hitsOut.textContent = hits + (hits === 1 ? ' hit' : ' hits');
+    };
+
+    var duck = function (h, escaped) {
+      if (!h.live) return;
+      h.live = false;
+      h.el.classList.remove('up');
+      window.clearTimeout(h.timer);
+      if (escaped && running) {
+        strikes++;
+        h.el.classList.add('miss');
+        window.setTimeout(function () { h.el.classList.remove('miss'); }, 400);
+        paint();
+        if (strikes >= MAX_STRIKES) stop();
+      }
+    };
+
+    var pop = function () {
+      var free = holes.filter(function (h) { return !h.live; });
+      if (!free.length) return;
+      var h = free[Math.floor(Math.random() * free.length)];
+      h.fruit.src = 'assets/img/fruits/' + FRUITS[Math.floor(Math.random() * FRUITS.length)] + '.png';
+      h.live = true;
+      h.el.classList.remove('hit');
+      h.el.classList.add('up');
+      // Fruit get quicker as the run goes on, but stop at 620ms: the real game keeps
+      // going down to 430ms, which is not a fair ask of a mouse on a web page.
+      var alive = Math.max(620, 1500 - (Date.now() - startedAt) / 12);
+      h.timer = window.setTimeout(function () { duck(h, true); }, alive);
+    };
+
+    var stop = function () {
+      running = false;
+      window.clearInterval(clock);
+      window.clearInterval(spawner);
+      holes.forEach(function (h) { duck(h, false); });
+      demo.classList.add('over');
+      startBtn.textContent = 'Again';
+      hint.textContent = 'Three escaped. In the real game the fruit are half that slow by now.';
+    };
+
+    var start = function () {
+      hits = 0;
+      strikes = 0;
+      startedAt = Date.now();
+      running = true;
+      demo.classList.remove('over');
+      startBtn.textContent = 'Restart';
+      hint.textContent = 'Whack the fruit before it ducks back down.';
+      paint();
+      msOut.textContent = '0';
+
+      clock = window.setInterval(function () {
+        msOut.textContent = String(Date.now() - startedAt);
+      }, 33);
+      spawner = window.setInterval(function () {
+        pop();
+        // A second fruit joins once the run has legs, as it does in the game.
+        if (Date.now() - startedAt > 6000 && Math.random() < 0.5) pop();
+      }, 700);
+      pop();
+    };
+
+    holes.forEach(function (h) {
+      h.el.addEventListener('click', function () {
+        if (!running || !h.live) return;
+        hits++;
+        h.el.classList.add('hit');
+        // Restart the splat animation even when the same hole is hit twice running.
+        h.splat.src = 'assets/img/splats/splat' + Math.floor(Math.random() * 3) + '.png';
+        duck(h, false);
+        paint();
+      });
+    });
+
+    startBtn.addEventListener('click', function () {
+      if (running) stop();
+      start();
+    });
+
+    // Stop when the section scrolls away: an interval ticking every 33ms for a game
+    // nobody is looking at is exactly the kind of thing that flattens a phone battery.
+    if ('IntersectionObserver' in window) {
+      new IntersectionObserver(function (entries) {
+        entries.forEach(function (entry) {
+          if (!entry.isIntersecting && running) stop();
+        });
+      }, { threshold: 0.1 }).observe(demo);
+    }
+
+    paint();
+  }
+})();

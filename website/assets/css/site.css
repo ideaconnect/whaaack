@@ -375,3 +375,321 @@ p { margin: 0 0 1em; }
   color: var(--cream);
   font-size: .9rem;
 }
+
+/* ====================================================================================
+   Motion, and the two pieces that are more than decoration: a real recorded run in the
+   hero, and a board you can actually whack.
+
+   Everything below degrades. With JS off the fan is a plain row, the demo board stays
+   empty and collapses, the video shows its poster and the counters show their final
+   numbers. With prefers-reduced-motion nothing moves on its own.
+   ==================================================================================== */
+
+/* ---- scroll progress -------------------------------------------------------------- */
+
+.scroll-progress {
+  position: fixed;
+  inset: 0 0 auto;
+  height: 3px;
+  z-index: 60;
+  pointer-events: none;
+}
+.scroll-progress span {
+  display: block;
+  height: 100%;
+  width: 100%;
+  transform: scaleX(var(--p, 0));
+  transform-origin: 0 50%;
+  background: linear-gradient(90deg, var(--accent), var(--accent-2));
+}
+
+/* ---- store badge ------------------------------------------------------------------ */
+
+.store-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 20px 10px 16px;
+  border-radius: 14px;
+  background: #0b0b0d;
+  border: 1px solid rgba(255, 243, 230, .3);
+  color: #fff;
+  min-height: 58px;
+  position: relative;
+  overflow: hidden;
+  transition: transform .16s ease, border-color .16s ease;
+}
+a.store-badge:hover {
+  transform: translateY(-2px);
+  border-color: rgba(255, 243, 230, .6);
+  text-decoration: none;
+}
+.store-glyph { width: 26px; height: 26px; flex: 0 0 auto; }
+.store-text { display: flex; flex-direction: column; line-height: 1.12; }
+.store-text small {
+  font-size: .62rem;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, .78);
+}
+.store-text b { font-size: 1.18rem; font-weight: 700; letter-spacing: .01em; }
+
+/* Not a link while there is no listing. Reads as a badge rather than as a button that
+   ignores you. */
+.store-badge.is-soon { cursor: default; opacity: .92; }
+.store-badge.is-soon .store-glyph { filter: saturate(.85); }
+
+/* A slow sheen, so a badge that cannot be clicked yet still looks alive. */
+.store-badge::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -60%;
+  width: 40%;
+  background: linear-gradient(100deg, transparent, rgba(255, 255, 255, .16), transparent);
+  animation: sheen 5.5s ease-in-out infinite;
+}
+@keyframes sheen {
+  0%, 65% { left: -60%; }
+  100%    { left: 130%; }
+}
+
+.pkg { margin-top: 14px; font-size: .82rem; color: var(--cream-faint); }
+.pkg code {
+  background: rgba(9, 20, 40, .6);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 2px 7px;
+}
+
+/* ---- hero video stage ------------------------------------------------------------- */
+
+.phone-stage { position: relative; }
+
+/* A warm bloom behind the phone, so it sits in the page rather than on top of it. */
+.phone-stage::before {
+  content: "";
+  position: absolute;
+  inset: 6% 8%;
+  border-radius: 50%;
+  background: radial-gradient(closest-side, rgba(255, 201, 122, .30), transparent 72%);
+  filter: blur(22px);
+  z-index: -1;
+}
+.phone-video { aspect-ratio: 540 / 1202; }
+.phone-video video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 26px;
+  display: block;
+  background: #12233d;
+}
+.stage-note {
+  margin: 16px 0 0;
+  text-align: center;
+  font-size: .76rem;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  font-weight: 800;
+  color: var(--cream-faint);
+}
+
+/* Pointer tilt. site.js writes --rx / --ry; without it the element simply sits still. */
+.phone[data-tilt] {
+  transform: perspective(900px) rotateX(var(--rx, 0deg)) rotateY(var(--ry, 0deg));
+  transition: transform .25s ease;
+  will-change: transform;
+}
+
+/* ---- the playable demo ------------------------------------------------------------ */
+
+.demo {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  padding: clamp(16px, 3vw, 26px);
+  max-width: 520px;
+  margin-inline: auto;
+  backdrop-filter: blur(6px);
+}
+.demo-hud {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 12px 16px;
+  border-radius: 16px;
+  background: rgba(9, 20, 40, .72);
+  border: 1px solid var(--line);
+}
+.demo-score b {
+  font-size: 2rem;
+  font-weight: 900;
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
+.demo-score small { font-size: .8rem; color: var(--cream-faint); margin-left: 4px; }
+.demo-meta {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  font-size: .76rem;
+  font-weight: 800;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--cream-faint);
+}
+.demo-strikes { display: inline-flex; gap: 5px; }
+.demo-strikes i { width: 9px; height: 9px; border-radius: 50%; background: rgba(255, 243, 230, .22); }
+.demo-strikes i.out { background: var(--danger); }
+
+.demo-board {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: clamp(6px, 1.4vw, 10px);
+  margin: 16px 0;
+}
+
+/* No JS, no board — and no empty grid sitting there either. */
+.demo-board:empty { display: none; }
+
+.hole {
+  position: relative;
+  aspect-ratio: 1;
+  border-radius: 14px;
+  background: linear-gradient(180deg, rgba(255, 243, 230, .07), rgba(9, 20, 40, .5));
+  border: 1px solid var(--line);
+  overflow: hidden;
+  cursor: pointer;
+  /* The whole tile is the target: a fiddly hitbox is not the difficulty this is for. */
+  padding: 0;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* The dark ellipse the fruit climbs out of, same as the board in the game. */
+.hole::after {
+  content: "";
+  position: absolute;
+  left: 14%;
+  right: 14%;
+  bottom: 16%;
+  height: 22%;
+  border-radius: 50%;
+  background: rgba(4, 8, 18, .78);
+}
+.hole img.fruit {
+  position: absolute;
+  left: 50%;
+  bottom: 12%;
+  width: 62%;
+  translate: -50% 130%;
+  image-rendering: pixelated;
+  transition: translate .16s cubic-bezier(.2, .9, .3, 1.4);
+  pointer-events: none;
+  z-index: 1;
+}
+.hole.up img.fruit { translate: -50% 0; }
+.hole img.splat {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 84%;
+  translate: -50% -50%;
+  opacity: 0;
+  scale: .4;
+  pointer-events: none;
+  z-index: 2;
+}
+.hole.hit img.splat { animation: splat .5s ease-out forwards; }
+@keyframes splat {
+  0%   { opacity: 0;   scale: .4; }
+  30%  { opacity: .95; scale: 1.05; }
+  100% { opacity: 0;   scale: 1.25; }
+}
+.hole.miss { animation: missflash .4s ease-out; }
+@keyframes missflash {
+  0%, 100% { box-shadow: none; }
+  40%      { box-shadow: inset 0 0 0 2px var(--danger); }
+}
+
+.btn-demo { width: 100%; }
+.demo-hint { margin: 12px 0 0; text-align: center; font-size: .84rem; color: var(--cream-faint); }
+.demo.over .demo-score b { color: var(--danger); }
+
+/* ---- the screenshot fan ----------------------------------------------------------- */
+
+/* Full bleed, so the fan can spread past the content column. */
+.fan-rail { width: 100%; overflow: hidden; padding: 10px 0 30px; }
+.fan {
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  /* --fan runs 0 to 1 as the section crosses the viewport; site.js writes it. Default 1
+     so that without JS the fan is simply open. */
+  --fan: 1;
+}
+.fan figure {
+  margin: 0;
+  flex: 0 0 auto;
+  width: min(210px, 42vw);
+  text-align: center;
+  /* Shut, the four overlap into a deck; open, they spread out and straighten up. */
+  --spread: calc(var(--i) - 1.5);
+  margin-inline: calc(-34px + var(--fan) * 34px);
+  rotate: calc(var(--spread) * (7deg - var(--fan) * 4deg));
+  translate: 0 calc(abs(var(--spread)) * (26px - var(--fan) * 18px));
+  transform-origin: 50% 120%;
+  transition: rotate .4s ease, translate .4s ease, margin-inline .4s ease;
+  z-index: 1;
+}
+.fan figure:hover { z-index: 3; }
+.fan figure:hover .phone { transform: translateY(-14px) scale(1.04); }
+.fan .phone {
+  width: 100%;
+  aspect-ratio: 540 / 1205;
+  transition: transform .28s ease;
+}
+.fan figcaption {
+  margin-top: 14px;
+  font-size: .74rem;
+  color: var(--cream-faint);
+  font-weight: 800;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+}
+@media (max-width: 720px) {
+  /* A fan of four is a hand of playing cards on a phone. Two rows read better. */
+  .fan { flex-wrap: wrap; gap: 18px 10px; }
+  .fan figure { width: min(150px, 40vw); margin-inline: 0; rotate: none; translate: none; }
+}
+
+/* ---- the closing strip ------------------------------------------------------------ */
+
+.get-strip {
+  display: flex;
+  gap: 26px;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  padding: clamp(22px, 4vw, 34px);
+  backdrop-filter: blur(6px);
+}
+.get-actions { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }
+
+/* ---- staggered reveal ------------------------------------------------------------- */
+
+.js .reveal { transition-delay: calc(var(--i, 0) * 70ms); }
+
+@media (prefers-reduced-motion: reduce) {
+  .store-badge::after { animation: none; }
+  .phone[data-tilt] { transform: none; }
+  .hole img.fruit { transition: none; }
+  .hole.hit img.splat { animation: none; opacity: .9; }
+  .fan figure { rotate: none; translate: none; transition: none; }
+  .scroll-progress { display: none; }
+}
