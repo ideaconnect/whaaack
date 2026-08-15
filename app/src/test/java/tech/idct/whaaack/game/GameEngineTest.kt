@@ -344,8 +344,8 @@ class GameEngineTest {
         }
 
         // Past that point the pace tail does eventually flatten, because life and interval are
-        // whole milliseconds and the geometric decay per level falls below 1ms somewhere around
-        // level 66. That is not the old problem coming back: concurrency has been pinned at one
+        // whole milliseconds and the geometric decay per level falls below 1ms somewhere past
+        // level 100. That is not the old problem coming back: concurrency has been pinned at one
         // fruit per tile since TOP_SPEED_LEVEL, which is the thing that actually ends runs. It
         // is recorded here so the flattening is understood rather than rediscovered as a bug.
         assertEquals(GameEngine.MAX_TARGETS, GameEngine.targetsAtLevel(GameEngine.TOP_SPEED_LEVEL))
@@ -353,16 +353,16 @@ class GameEngineTest {
     }
 
     @Test
-    fun `past the tuned opening, no level is a third harder than the one before`() {
-        // The complaint, made testable: level 8 to 9 used to jump 6.9 to 9.6 arrivals per
-        // second — a 39% step, because a fifth fruit landed exactly where both pace tracks
-        // bottomed out. A discrete new fruit is always a step, but it should read as a gear
-        // change rather than a wall.
+    fun `past the fourth slot, no level is a third harder than the one before`() {
+        // A discrete new fruit is always a step, but it should read as a gear change
+        // rather than a wall. The old ladder jumped +73% and then +57% four seconds
+        // apart as the third and fourth slots arrived, which was the wall almost every
+        // run died against.
         //
-        // Measured from the fourth slot on. The opening deliberately steps harder than this
-        // (level 5 is +73%, level 6 +57%, as the third and fourth fruit arrive) and that is
-        // the tuning the game shipped with and nobody objected to — the complaint was about
-        // what happens *after* it, which is the part that changed.
+        // Measured from the fourth slot on. The two steps before it are deliberately
+        // bigger in relative terms (+55% into the third slot, +38% into the fourth) —
+        // (N+1)/N makes anything under +33% mathematically impossible there — but they
+        // land while absolute pressure is still low, which is what makes them playable.
         var previous = 0.0
         for (level in GameEngine.FOURTH_TARGET_LEVEL..GameEngine.TOP_SPEED_LEVEL) {
             val pressure = GameEngine.targetsAtLevel(level) * 1000.0 /
@@ -401,39 +401,57 @@ class GameEngineTest {
     }
 
     @Test
-    fun `the tuned opening is untouched by the endless tail`() {
-        // Regression guard. Levels 0..8 were tuned deliberately (commit b91938f) and the
-        // rewrite is meant to be strictly additive: identical up to the knee, new after it.
-        val expectedLife = intArrayOf(1550, 1415, 1280, 1145, 1010, 875, 740, 605, 470)
-        val expectedInterval = intArrayOf(900, 828, 756, 684, 612, 540, 468, 396, 324)
+    fun `the opening ramp is exactly as retuned`() {
+        // Regression guard for the 2026-08 retune. The old opening spent twenty seconds
+        // under 1.5 arrivals per second — half of a typical run, all filler — and then
+        // doubled the pressure in eight seconds. The new one climbs a few percent per
+        // level from the first frame, with the knee at level 10.
+        val expectedLife = intArrayOf(1250, 1218, 1186, 1154, 1122, 1090, 1058, 1026, 994, 962, 930)
+        val expectedInterval = intArrayOf(850, 820, 790, 760, 730, 700, 670, 640, 610, 580, 550)
         for (level in expectedLife.indices) {
             assertEquals("life at level $level", expectedLife[level], GameEngine.fruitLifeMs(level))
             assertEquals("interval at level $level", expectedInterval[level], GameEngine.spawnIntervalMs(level))
         }
-        // The slot ladder's opening is likewise unchanged.
-        assertEquals(2, GameEngine.targetsAtLevel(0))
-        assertEquals(2, GameEngine.targetsAtLevel(4))
-        assertEquals(3, GameEngine.targetsAtLevel(5))
-        assertEquals(4, GameEngine.targetsAtLevel(6))
     }
 
     @Test
-    fun `the fourth slot holds until level 12, then one opens every four`() {
-        // The shape that matters: four fruit are held through the levels where both pace
-        // tracks reach their knee, so the run does not take three step-changes at once around
-        // the thirty-second mark. That was the wall.
-        assertEquals(4, GameEngine.targetsAtLevel(8))
-        assertEquals(4, GameEngine.targetsAtLevel(9))
-        assertEquals(4, GameEngine.targetsAtLevel(11))
-        assertEquals(5, GameEngine.targetsAtLevel(12))
-        assertEquals(5, GameEngine.targetsAtLevel(15))
-        assertEquals(6, GameEngine.targetsAtLevel(16))
+    fun `the slot ladder climbs one rung at a time to a full board`() {
+        // One slot step per stretch of plain pace-ramp, never two rungs back to back —
+        // the old ladder's third and fourth slots arrived four seconds apart, and that
+        // double step was the wall almost every run died against.
+        assertEquals(2, GameEngine.targetsAtLevel(0))
+        assertEquals(2, GameEngine.targetsAtLevel(3))
+        assertEquals(3, GameEngine.targetsAtLevel(4))
+        assertEquals(3, GameEngine.targetsAtLevel(9))
+        assertEquals(4, GameEngine.targetsAtLevel(10))
+        assertEquals(4, GameEngine.targetsAtLevel(15))
+        assertEquals(5, GameEngine.targetsAtLevel(16))
+        assertEquals(5, GameEngine.targetsAtLevel(19))
+        assertEquals(6, GameEngine.targetsAtLevel(20))
 
         // The cap is physical: a seventeenth fruit has no tile to stand on.
         assertEquals(GameEngine.TILE_COUNT, GameEngine.MAX_TARGETS)
         assertEquals(GameEngine.MAX_TARGETS, GameEngine.targetsAtLevel(GameEngine.TOP_SPEED_LEVEL))
         assertEquals(GameEngine.MAX_TARGETS, GameEngine.targetsAtLevel(10_000))
         assertEquals(GameEngine.MAX_TARGETS, engine().slots.size)
+    }
+
+    @Test
+    fun `pressure sweeps the human band instead of leaping across it`() {
+        // The yardstick the curve was retuned against: sustained aimed tapping on a 4x4
+        // phone grid runs from ~2.5/s (casual) to ~6/s (expert). Where a run ends should
+        // be decided by where a player sits in that band, so the curve must move through
+        // it slowly — not spend twenty seconds below it and then leap past it, which is
+        // what compressed every death into the same sixteen-second window before.
+        fun pressure(level: Int) = GameEngine.targetsAtLevel(level) * 1000.0 /
+            (GameEngine.spawnIntervalMs(level) * 0.35 + GameEngine.fruitLifeMs(level))
+
+        assertTrue("the opening should not be comatose", pressure(0) > 1.0)
+        assertTrue("no wall inside the first half minute",
+            (0..7).all { pressure(it) < 3.0 })
+        assertTrue("a good player must still be alive past a minute", pressure(17) < 5.5)
+        assertTrue("but nobody outlasts the ladder — terminal by three minutes",
+            pressure(45) > 8.0)
     }
 
     /**
@@ -477,6 +495,109 @@ class GameEngineTest {
                 "fruit on the board at level $level",
                 GameEngine.targetsAtLevel(level),
                 most,
+            )
+        }
+    }
+
+    @Test
+    fun `no two fruit ever surface in the same instant`() {
+        // Two fruit blinking in together at opposite corners is a strike no reaction can
+        // prevent: one thumb cannot be in two places, and even two cannot launch at once.
+        // Board-wide spawn spacing turns every pair into an order — this one, then that
+        // one. Driven with the stalling player so the board stays as crowded as it can
+        // get, across the slot openings where simultaneous spawns were most likely.
+        val engine = engine()
+        var now = engine.begin()
+
+        var guard = 0
+        while (engine.level <= GameEngine.FOURTH_TARGET_LEVEL + 2 &&
+            engine.phase == GameEngine.Phase.RUNNING && guard++ < 20_000
+        ) {
+            now += FRAME
+            engine.update(now)
+            val spacing = GameEngine.spawnSpacingMs(engine.level)
+            val born = engine.slots.filterNotNull().map { it.bornNs }.sorted()
+            for (i in 1 until born.size) {
+                assertTrue(
+                    "two spawns ${(born[i] - born[i - 1]) / MS}ms apart",
+                    born[i] - born[i - 1] >= spacing * MS,
+                )
+            }
+            engine.tapExpiring(now)
+        }
+        assertEquals("the run should have survived the whole window", 0, engine.strikes)
+        assertTrue(
+            "expected to play through the four-slot band",
+            engine.level > GameEngine.FOURTH_TARGET_LEVEL,
+        )
+    }
+
+    @Test
+    fun `the spawn gap yields to the ladder instead of capping it`() {
+        // The trap in the spacing rule, found by simulating it rather than reading it: a gap
+        // of g between arrivals means at most life/g fruit can ever be airborne together,
+        // whatever the ladder asks for. At a flat 100ms the board topped out around twelve
+        // fruit and arrivals around ten a second — an endgame cap, which is the plateau the
+        // ladder exists to abolish, and it handed anyone who could sustain that rate a run
+        // that never ended.
+        for (level in 0..GameEngine.TOP_SPEED_LEVEL) {
+            val spacing = GameEngine.spawnSpacingMs(level)
+            val targets = GameEngine.targetsAtLevel(level)
+            val life = GameEngine.fruitLifeMs(level)
+            assertTrue("spacing collapsed to nothing at level $level", spacing >= 1L)
+            assertTrue(
+                "at level $level the ${spacing}ms gap caps the board at ${life / spacing} " +
+                    "fruit, but the ladder asks for $targets",
+                life / spacing >= targets,
+            )
+        }
+
+        // And it is not paid for early: the full gap holds through the levels any real run
+        // reaches, and only yields once the board is meant to be drowning the player.
+        for (level in 0..27) {
+            assertEquals(
+                "the gap should still be intact at level $level",
+                GameEngine.SPAWN_SPACING_MS,
+                GameEngine.spawnSpacingMs(level),
+            )
+        }
+        assertTrue(
+            "the gap should taper once the ladder needs the room",
+            GameEngine.spawnSpacingMs(GameEngine.TOP_SPEED_LEVEL) < GameEngine.SPAWN_SPACING_MS,
+        )
+    }
+
+    @Test
+    fun `one lapse costs one strike, never a cascade`() {
+        // Fruits that spawn near each other expire near each other, so the moment that
+        // took strike one was exactly the moment strikes two and three were due — a run
+        // could end in a blink the player experienced as a single mistake. The grace
+        // spreads them: every strike buys the rest of the board a beat, so a loss is
+        // three readable events at least STRIKE_GRACE_MS apart.
+        val engine = engine()
+        val strikeTimes = mutableListOf<Long>()
+        var now = engine.begin()
+        engine.listener = object : GameEngine.Listener {
+            override fun onHit(fruit: Fruit) = Unit
+            override fun onStrike(strikes: Int) {
+                strikeTimes += now
+            }
+            override fun onGameOver(result: GameEngine.Result) = Unit
+        }
+
+        // Never tap: every fruit escapes, exactly the overwhelmed endgame.
+        var guard = 0
+        while (engine.strikes < GameEngine.MAX_STRIKES && guard++ < 10_000) {
+            now += FRAME
+            engine.update(now)
+        }
+
+        assertEquals(GameEngine.MAX_STRIKES, strikeTimes.size)
+        for (i in 1 until strikeTimes.size) {
+            val gapMs = (strikeTimes[i] - strikeTimes[i - 1]) / MS
+            assertTrue(
+                "strikes ${gapMs}ms apart — the run can still end in a blink",
+                gapMs >= GameEngine.STRIKE_GRACE_MS,
             )
         }
     }

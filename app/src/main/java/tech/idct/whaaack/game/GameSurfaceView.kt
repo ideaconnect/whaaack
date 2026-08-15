@@ -207,7 +207,7 @@ class GameSurfaceView @JvmOverloads constructor(
     @SuppressLint("ClickableViewAccessibility")
     override fun onTouchEvent(event: MotionEvent): Boolean {
         // ACTION_POINTER_DOWN counts as well as ACTION_DOWN. Four fruit are up at once by the
-        // seventh gear, so a second thumb landing while the first is still down is how the
+        // eleventh gear, so a second thumb landing while the first is still down is how the
         // game is meant to be played — taking only ACTION_DOWN dropped every one of those
         // taps on the floor and let the fruit expire into a strike.
         val action = event.actionMasked
@@ -278,7 +278,7 @@ class GameSurfaceView @JvmOverloads constructor(
      *
      * The loop's only pacing is `lockHardwareCanvas` blocking on the buffer queue, so it
      * otherwise runs at whatever the panel refreshes at — 120 Hz, sometimes 144 — for a game
-     * whose fastest fruit lives 430ms. That is two to two-and-a-half times the GPU work,
+     * whose fruit never lives under 380ms. That is two to two-and-a-half times the GPU work,
      * battery draw and heat for no gameplay benefit whatsoever, on top of roughly 3.5x
      * full-screen overdraw per frame. FIXED_SOURCE tells the compositor this is content with
      * an inherent rate rather than a preference, which is what lets it pick a divisor of the

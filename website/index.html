@@ -95,9 +95,9 @@
             lasted.
           </p>
           <p class="lead">
-            It starts gentle. By the seventh gear there are four fruit up at once; by the
-            ninth each one is alive for less than half a second, and you will be using both
-            thumbs.
+            It starts gentle. A third fruit joins in the fifth gear, a fourth in the
+            eleventh, and the orchard keeps adding them from there — sooner or later it
+            outruns you, and you will be using both thumbs.
           </p>
 
           <div class="hero-actions">
@@ -128,15 +128,16 @@
           <div class="hero-stats">
             <!--
               Every number here is read off GameEngine.kt, not off a first impression. Top
-              speed is level 56 — where the slot ladder finally reaches all sixteen tiles —
-              and the fruit life there is 363ms, approaching but never touching the 300ms
-              floor. "Four at top speed" and "430ms shortest life" were both wrong: four is
-              the count for gears 7 to 12, and 430ms is the knee, not the bottom.
+              speed is level 60 — where the slot ladder finally reaches all sixteen tiles —
+              and the fruit life there is 580ms, approaching but never touching the 380ms
+              floor. (After the 2026-08 retune the late difficulty is volume, not blink
+              speed: sixteen tiles cycling is what ends a run, so the shortest life a
+              player ever sees is longer than it used to be.)
             -->
             <div><b data-count="16">16</b><span>tiles</span></div>
             <div><b data-count="3">3</b><span>strikes</span></div>
             <div><b data-count="4">4</b><span>seconds per gear</span></div>
-            <div><b data-count="363">363</b><span>ms at top speed</span></div>
+            <div><b data-count="580">580</b><span>ms at top speed</span></div>
           </div>
         </div>
 
@@ -187,8 +188,8 @@
           <h3>Whack what pops</h3>
           <p>
             Two fruit cycle at first, each refilling on a jittered timer of its own, so the
-            pair drifts in and out of step. A third joins in the sixth gear, a fourth in the
-            seventh, a fifth in the thirteenth.
+            pair drifts in and out of step. A third joins in the fifth gear, a fourth in the
+            eleventh, a fifth in the seventeenth — and no two ever surface in the same instant.
           </p>
         </div>
         <div class="card reveal" style="--i:1">
@@ -213,8 +214,8 @@
           <span class="ico"><img src="assets/img/fruits/grape.png" alt=""></span>
           <h3>It never levels off</h3>
           <p>
-            Fruit arrive faster and live shorter every four seconds, another joins every four
-            gears, and neither curve ever eases: by top speed all sixteen tiles cycle. Take a call
+            Fruit arrive faster and live shorter every four seconds, another keeps joining,
+            and neither curve ever eases: by top speed all sixteen tiles cycle. Take a call
             and the clock stops — though a closed app ends the run.
           </p>
         </div>

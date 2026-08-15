@@ -1294,9 +1294,10 @@ these are the structural and delivery problems in `website/` and `.github/workfl
   emulator.
 
 - [ ] **Cover the four untested modules that decide money, identity and rank** 🟡
-  `GameEngineTest` is genuinely good work — 15 tests covering the pause/resume clock, taps,
-  quit/loss reporting, splat expiry, the target ladder and the curve. It is also the only test file
-  against 6,700 lines of main source. In order of blast radius: **BillingManager.refresh()** (see
+  `GameEngineTest` is genuinely good work — 36 tests covering the pause/resume clock, taps,
+  quit/loss reporting, splat expiry, the target ladder, the curve, the End-run arming, banking an
+  interrupted run, and the spawn-spacing and strike-grace fairness rules. In order of blast
+  radius: **BillingManager.refresh()** (see
   §5); ~~**deep-link fragment parsing**~~ — **done** (see the money-and-login review): extracted as
   `parseAuthFragment(String?)` into `data/AuthLink.kt` and covered by `AuthLinkTest`, nine tests
   over percent-decoding, `error_description`, half a token pair, a missing `expires_in`, an `=`
@@ -1450,6 +1451,60 @@ these are the structural and delivery problems in `website/` and `.github/workfl
 
   Verified: 25 unit tests pass (5 new for the curve and saturation), debug and R8 release build,
   `lintVitalRelease` clean.
+
+  **Retuned again 2026-08-15, this time around a measurable yardstick.** The ladder above made
+  runs terminate, but modelling *pressure* — fruit arrivals per second the player must match,
+  `targets × 1000 / (interval × 0.35 + life)` — showed the shape it terminated with was wrong.
+  Sustained aimed tapping on a phone grid runs from ~2.5/s (casual) to ~6/s (expert); the tuned
+  opening spent twenty seconds under 1.5/s (half of a typical run, all filler), then jumped
+  +73% and +57% in eight seconds as the third and fourth slots landed four seconds apart, and
+  was past 6/s by the 36-second mark. Every grade of player died inside the same 16-second
+  window, so survival time barely separated a beginner from an expert — and everything from the
+  fifth slot on was content no run could reach.
+
+  Both pace tracks and the ladder are retuned so pressure sweeps the human band instead of
+  leaping across it: ~1.2/s at the first frame (no runway), one slot per step — third at level
+  4, fourth at 10, fifth at 16, then every 4 — with each later step landing on the flat tail at
+  under +27%. Pressure crosses ~2.5/s at 40s, ~4.5/s at 80s, and passes any human near two
+  minutes, so where a run ends is now decided by skill across a 40s–2min range rather than by
+  one wall at half a minute. The board still fills, at level 60 now. This settles the scoring
+  question the original item raised: with deaths spread by skill and runs self-terminating,
+  **milliseconds survived is the right score** and needs no replacement.
+
+  **No migration is needed, but not for the reason it first appeared.** The HUD's `displaySpeed`
+  saturates at 61, comfortably under `scores.top_speed <= 64` — except `displaySpeed` is not
+  what gets posted. `WhaaackViewModel.onRunFinished` submits `result.topSpeedLevel`, the raw
+  and *unclamped* `level`, which is `elapsedMs / 4000` and reaches 65 at 260 seconds. So the
+  real margin is wall-clock: the constraint rejects any run past **4m20s**, and the retune is
+  precisely what stretched runs toward that. Simulation puts the ceiling well inside it — a
+  superhuman 15 taps/second dies at ~200s, and by level 60 sixteen fruit share sixteen tiles at
+  ~28 arrivals/second — so no reachable run is refused. Worth writing down rather than
+  rediscovering: the column holds the level, the readout does not, and it is the level that has
+  to stay under 64. The `hits` constraint has far more room — a flawless player's cumulative
+  hits never come within 164 of `40 × seconds + 20`, because the budget accrues across the slow
+  early levels the player is nowhere near saturating.
+
+  Two fairness mechanics rode along, both in `GameEngine` and both tested: spawns keep a
+  board-wide minimum spacing, so two fruit can never blink in at the same instant in opposite
+  corners (a strike no reaction could prevent); and a strike grants every other airborne fruit
+  at least 450ms of remaining life, so fruit that spawned together expiring together costs one
+  strike and a recoverable board rather than the run ending in a blink — three strikes are now
+  always three readable events.
+
+  **The spacing had a trap in it, found by simulating the engine rather than reading it.** A
+  gap of `g` between arrivals means at most `life / g` fruit can ever be airborne together,
+  whatever the ladder asks for — the fruit at the front dies before the queue behind it has
+  finished arriving. At the flat 100ms it was first written with, the board topped out around
+  **twelve** fruit instead of sixteen and arrivals capped near **ten a second**, which is an
+  endgame plateau: exactly what the ladder exists to abolish, and it handed anyone who could
+  sustain ten taps a second a run that never ended. `spawnSpacingMs(level)` is now
+  `min(100ms, life / targets)`, the widest gap at which the level's own fruit count is still
+  reachable. It holds the full 100ms through level 27 — past where even a 6.5 taps/second
+  expert's run ends, so the fairness guarantee is untouched for every real player — and only
+  tapers in the endgame, where near-simultaneous arrivals are the point. Simulated across
+  skill levels, every rate now terminates: 6.5/s at ~108s, 8/s at ~132s, 12/s at ~172s,
+  15/s at ~200s. The property is guarded by
+  `the spawn gap yields to the ladder instead of capping it`.
 
 - [x] **Give the weekly leaderboard a visible reset** — **done; the "payoff" half declined**
   `current_week_start()` is Monday 00:00 UTC and the UI exposes Weekly as a tab with an honest

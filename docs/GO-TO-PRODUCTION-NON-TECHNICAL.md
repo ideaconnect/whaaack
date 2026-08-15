@@ -255,8 +255,8 @@ declaration, so several of these are also Play submission risks.
   motion" toggle, which the backdrop genuinely honours. Everything else is unaddressed, and the
   *game* is a different problem from the menus: the run is drawn on a Canvas by a private render
   thread, so TalkBack cannot see the board, the score, the strikes or the End-run control at all.
-  There is one difficulty with no way to slow it down, fruit live 430ms across four slots at top
-  speed, fruit are distinguished by colour and silhouette with no colourblind consideration, and
+  There is one difficulty with no way to slow it down, fruit live 580ms across all sixteen tiles
+  at top speed, fruit are distinguished by colour and silhouette with no colourblind consideration, and
   the three strike dots are red-on-dim with no other indicator. Record the legal position: the
   European Accessibility Act has applied since 28 June 2025 and covers e-commerce services, with a
   microenterprise exemption IDCT plainly meets — but the exemption applies to services, not

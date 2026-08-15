@@ -15,7 +15,11 @@ import kotlin.random.Random
  *  - a fruit that is not whacked before its life expires costs a strike;
  *  - three strikes end the run;
  *  - the score is the number of milliseconds survived;
- *  - fruits arrive faster and live shorter the longer the run goes on.
+ *  - fruits arrive faster and live shorter the longer the run goes on;
+ *  - no two fruits ever surface in the same instant: spawns keep a minimum spacing, so a
+ *    pair always reads as first-then-second rather than an unreactable blink;
+ *  - a strike buys a beat: every other fruit on the board is held back from expiring for
+ *    a moment, so one lapse costs one strike rather than a cascade.
  */
 class GameEngine(private val random: Random = Random.Default) {
 
@@ -108,6 +112,9 @@ class GameEngine(private val random: Random = Random.Default) {
     private var startNs = 0L
     private var countdownEndsNs = 0L
     private val nextSpawnNs = LongArray(MAX_TARGETS)
+
+    /** Nanotime of the most recent spawn, so arrivals can be kept perceptibly apart. */
+    private var lastSpawnNs = 0L
     private val pendingTaps = ConcurrentLinkedQueue<Int>()
     private val quitRequested = AtomicBoolean(false)
     private var result: Result? = null
@@ -141,6 +148,7 @@ class GameEngine(private val random: Random = Random.Default) {
         pendingTaps.clear()
         quitRequested.set(false)
         pausedAtNs = 0L
+        lastSpawnNs = 0L
         resumingRun = false
         openTargets = BASE_TARGETS
         quitArmedUntilNs = 0L
@@ -260,9 +268,10 @@ class GameEngine(private val random: Random = Random.Default) {
         for (i in nextSpawnNs.indices) nextSpawnNs[i] += gap
         for (active in slots) active?.let { it.bornNs += gap }
         for (splat in splats) splat.bornNs += gap
-        // Zero means "never happened", so those two must not be shifted into meaning something.
+        // Zero means "never happened", so these must not be shifted into meaning something.
         if (lastStrikeNs != 0L) lastStrikeNs += gap
         if (outroStartedNs != 0L) outroStartedNs += gap
+        if (lastSpawnNs != 0L) lastSpawnNs += gap
 
         if (interrupted) {
             phase = Phase.COUNTDOWN
@@ -342,6 +351,10 @@ class GameEngine(private val random: Random = Random.Default) {
             openTargets++
         }
 
+        // Hoisted: one computation a frame rather than one per slot, and `openTargets` is
+        // in step with the ladder by now.
+        val spacingNs = spacingFor(lifeMs, openTargets) * NS_PER_MS
+
         for (i in 0 until openTargets) {
             val active = slots[i]
             if (active != null) {
@@ -353,11 +366,18 @@ class GameEngine(private val random: Random = Random.Default) {
                     lastStrikeNs = nowNs
                     listener?.onStrike(strikes)
                     scheduleRespawn(i, nowNs)
+                    // One lapse costs one strike. Fruits that spawned near each other
+                    // expire near each other, so without this the moment that took strike
+                    // one is exactly the moment strikes two and three were due.
+                    graceOtherFruit(nowNs)
                 }
-            } else if (nowNs >= nextSpawnNs[i]) {
+            } else if (nowNs >= nextSpawnNs[i] && nowNs - lastSpawnNs >= spacingNs) {
                 // A full board is not an error and not a strike — the slot just waits. Only
                 // reschedule on success, so a blocked slot retries promptly rather than
-                // sitting out a whole interval it never got to use.
+                // sitting out a whole interval it never got to use. The second condition is
+                // the board-wide spacing: a slot whose moment falls too close behind another
+                // arrival stands back for a frame or two, so no two fruit ever blink in at
+                // the same instant.
                 spawn(i, nowNs, lifeMs)
             }
         }
@@ -447,7 +467,24 @@ class GameEngine(private val random: Random = Random.Default) {
             bornNs = nowNs,
             lifeMs = lifeMs,
         )
+        lastSpawnNs = nowNs
         return true
+    }
+
+    /**
+     * After a strike, tops the remaining life of every airborne fruit up to
+     * [STRIKE_GRACE_MS] — never past the fruit's own full life, so a rewound clock cannot
+     * sit in the future. The renderer keys everything off `bornNs`, so an extended fruit
+     * visibly un-fades: the reprieve reads on the board instead of happening silently in
+     * the model.
+     */
+    private fun graceOtherFruit(nowNs: Long) {
+        for (other in slots) {
+            if (other == null) continue
+            val grace = min(STRIKE_GRACE_MS, other.lifeMs.toLong())
+            val remainingMs = other.lifeMs - (nowNs - other.bornNs) / NS_PER_MS
+            if (remainingMs < grace) other.bornNs = nowNs - (other.lifeMs - grace) * NS_PER_MS
+        }
     }
 
     private fun scheduleRespawn(slot: Int, nowNs: Long) {
@@ -510,39 +547,36 @@ class GameEngine(private val random: Random = Random.Default) {
         /** Slots a run opens with. */
         const val BASE_TARGETS = 2
 
-        // Levels at which the third and fourth slots open. The HUD reads `level + 1`, so
-        // these are the points where the speed readout ticks to 6 and to 7: two fruit through
-        // the fifth gear, three in the sixth, four from the seventh on. Left exactly as tuned.
-        const val THIRD_TARGET_LEVEL = 5
-        const val FOURTH_TARGET_LEVEL = 6
-
         /**
-         * Level the fifth slot opens. Deliberately well past the fourth rather than three
-         * levels after it: the fourth arrives at level 6 and both pace tracks reach their knee
-         * at 9 and 10, so a new fruit there stacked three step-changes inside four levels —
-         * around thirty seconds in, which is where the run stopped being a ramp and became a
-         * wall. Holding at four through level 11 leaves a stretch at the old curve's plateau,
-         * the difficulty this game was actually tuned around, before the ladder climbs again.
+         * Levels at which the third, fourth and fifth slots open; one more opens every
+         * [TARGET_STEP_LEVELS] levels after the fifth until the board is full.
+         *
+         * The spacing is deliberate. A new slot multiplies the arrival rate by (N+1)/N
+         * whatever the pace tracks do — nothing can make that step smaller — so each one
+         * gets a stretch of plain pace-ramp to itself. The third lands while absolute
+         * pressure is still low, where a big relative step is a cheap thrill rather than a
+         * wall; every later slot waits for the tracks' flat tail, where the compounding
+         * stays under about a quarter per level. The old ladder opened the third and
+         * fourth slots four seconds apart — +73% then +57% arrival rate, back to back,
+         * twenty seconds in — and that double step was the wall almost every run died
+         * against.
          */
-        const val FIFTH_TARGET_LEVEL = 12
+        const val THIRD_TARGET_LEVEL = 4
+        const val FOURTH_TARGET_LEVEL = 10
+        const val FIFTH_TARGET_LEVEL = 16
 
         /** Levels between each further slot opening, once the fifth has landed. */
         const val TARGET_STEP_LEVELS = 4
 
         /**
-         * How many slots cycle at [level].
+         * How many slots cycle at [level]: two to open, then one more at each rung of the
+         * ladder above until the board is full.
          *
-         * The opening is untouched — two fruit, a third at level 5, a fourth at level 6, all
-         * as tuned. What changed is that it no longer stops there: a fifth opens at
-         * [FIFTH_TARGET_LEVEL], and one more every [TARGET_STEP_LEVELS] levels after that,
-         * until the board is full.
-         *
-         * That is what makes a run end. The curve used to flatten completely at level 10, so
-         * past forty seconds nothing got harder ever again and the score stopped measuring
-         * skill and started measuring stamina — the all-time best would be set by whoever was
-         * most willing to keep holding a phone, and would be effectively unbeatable. Now the
-         * board fills at level [TOP_SPEED_LEVEL], and sixteen fruit sharing sixteen tiles is
-         * not survivable by anybody. Runs terminate on their own.
+         * The ladder is what makes a run end. The pace tracks flatten toward their floors
+         * past the knee, so it is the growing fruit count that carries the late
+         * difficulty — and sixteen fruit sharing sixteen tiles is not survivable by
+         * anybody, so runs terminate on their own instead of measuring who is most
+         * willing to keep holding a phone.
          */
         fun targetsAtLevel(level: Int): Int = when {
             level < THIRD_TARGET_LEVEL -> BASE_TARGETS
@@ -580,32 +614,90 @@ class GameEngine(private val random: Random = Random.Default) {
         private const val SPAWN_GAP = 0.35f
         private const val SPAWN_JITTER = 0.45f
 
-        // Difficulty curve. Both tracks ramp linearly per level exactly as tuned, down to a
-        // knee; past the knee they keep tightening, but geometrically toward a hard floor
-        // rather than linearly into absurdity. So the pace never stops increasing, and it also
-        // never reaches a fruit life of zero, which would not be "hard" so much as broken.
+        // Difficulty curve, retuned around a measurable yardstick: pressure, the fruit
+        // arrivals per second a player must match to take no strikes, which is
+        // targets x 1000 / (interval x 0.35 + life). Sustained aimed tapping on a phone
+        // grid tops out near 2.5/s for a casual player and 6/s for an expert, so the
+        // curve is shaped to sweep that band slowly instead of leaping across it.
         //
-        // The knee values are the old flat floors, so every level up to and including the knee
-        // behaves precisely as it did before this change.
-        private const val START_INTERVAL_MS = 900
-        private const val KNEE_INTERVAL_MS = 200
-        private const val FLOOR_INTERVAL_MS = 120
-        private const val INTERVAL_STEP_MS = 72
+        // The old tune spent its first twenty seconds under 1.5/s — half of a typical
+        // run, all filler — then doubled the pressure in eight seconds (the slot ladder's
+        // double step) and was past every human's ceiling by the forty-second mark.
+        // Every grade of player died inside the same sixteen-second window, which also
+        // meant the leaderboard barely separated a casual from an expert, and the fifth
+        // slot onward was content no run could ever reach. Now pressure crosses ~2.5/s
+        // at forty seconds, ~4.5/s at eighty, and passes any human near the two-minute
+        // mark, so where a run ends is decided by skill across a wide range rather than
+        // by the same wall for everyone.
+        //
+        // Both tracks ramp linearly per level down to a knee at level 10; past the knee
+        // they keep tightening geometrically toward a hard floor rather than linearly
+        // into absurdity. So the pace never stops increasing, and it also never reaches
+        // a fruit life of zero, which would not be "hard" so much as broken.
+        private const val START_INTERVAL_MS = 850
+        private const val KNEE_INTERVAL_MS = 550
+        private const val FLOOR_INTERVAL_MS = 180
+        private const val INTERVAL_STEP_MS = 30
 
-        private const val START_LIFE_MS = 1_550
-        private const val KNEE_LIFE_MS = 430
-        private const val FLOOR_LIFE_MS = 300
-        private const val LIFE_STEP_MS = 135
+        private const val START_LIFE_MS = 1_250
+        private const val KNEE_LIFE_MS = 930
+        private const val FLOOR_LIFE_MS = 380
+        private const val LIFE_STEP_MS = 32
 
         /**
          * Per-level multiplier applied past the knee. Deliberately gentle: the concurrency
          * ladder is what carries the late difficulty, and compounding a steep pace decay on
          * top of a growing fruit count makes the endgame collapse in a couple of levels
-         * instead of tightening.
+         * instead of tightening. At 0.98 the pace drifts about a percent per level between
+         * slot openings — enough to keep the "never stops getting harder" promise true,
+         * not enough to add a second ramp under the ladder.
          */
-        // Softened from 0.97 after playing it: at 0.97 the pace was still visibly tightening
-        // while the slot count climbed, and the two compounding was too much too soon.
-        private const val TAIL_DECAY = 0.985
+        private const val TAIL_DECAY = 0.98
+
+        /**
+         * The gap [spawnSpacingMs] holds between spawns for as long as it can afford to.
+         *
+         * Without a gap two slots could surface fruit in the same instant — at opposite
+         * corners that is a strike no reaction could prevent, because one thumb cannot be
+         * in two places and even two cannot launch together. A tenth of a second is enough
+         * for a pair to read as an order, this one then that one.
+         */
+        const val SPAWN_SPACING_MS = 100L
+
+        /**
+         * Minimum gap between any two spawns, board-wide, at [level].
+         *
+         * Deliberately not a flat [SPAWN_SPACING_MS]. A gap of `g` between arrivals means
+         * at most `life / g` fruit can ever be airborne together, whatever the ladder asks
+         * for: a fruit at the front dies before the queue behind it has finished arriving.
+         * At a flat 100ms the board topped out near twelve fruit and arrivals near ten a
+         * second — which capped the endgame instead of merely spacing it, and handed a
+         * hypothetical player who could sustain that rate a run that never ends. That is
+         * precisely the plateau [targetsAtLevel]'s ladder exists to abolish.
+         *
+         * So the gap yields to the ladder rather than binding it: `life / targets` is the
+         * widest spacing at which the level's own fruit count is still reachable. It stays
+         * the full [SPAWN_SPACING_MS] through level 27 — past where even an expert's run
+         * ends — and only tapers in the endgame, where the board is meant to drown the
+         * player and a pair of near-simultaneous arrivals is the point rather than a
+         * unfairness. [targetsAtLevel] is never zero, so this never divides by one.
+         */
+        fun spawnSpacingMs(level: Int): Long =
+            spacingFor(fruitLifeMs(level), targetsAtLevel(level))
+
+        private fun spacingFor(lifeMs: Int, targets: Int): Long =
+            min(SPAWN_SPACING_MS, (lifeMs / targets).toLong())
+
+        /**
+         * The least remaining life every other airborne fruit is granted when a strike
+         * lands. Fruits that spawn near each other expire near each other, so the moment
+         * that took strike one was exactly the moment strikes two and three were due, and
+         * a single lapse read as the run ending in a blink. With the grace, strikes are
+         * always at least this far apart: a loss is three readable events, and one
+         * mistake costs one strike. It is no use as a lifeline — letting fruit escape on
+         * purpose buys well under half a second per strike, and there are only three.
+         */
+        const val STRIKE_GRACE_MS = 450L
 
         /**
          * Linear while [start] - level x [step] is still above [knee], then an asymptotic
