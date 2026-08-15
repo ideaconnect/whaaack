@@ -24,7 +24,18 @@ keystore.properties
 tools/icon-preview.png
 # Regenerate with: python tools/generate_pro_badge.py --preview
 tools/pro-badge-preview.png
+# Regenerate with: python tools/generate_achievement_icons.py --preview
+tools/achievements-preview.png
+# Regenerate with: python tools/generate_stat_icons.py --preview
+tools/stat-icons-preview.png
 tools/__pycache__/
+
+# The Game Stats upload bundle: a zip of files that are themselves committed beside it.
+# Regenerate with: python tools/build_game_stats_zip.py
+assets/game-stats/GameStats.zip
+# ...and wherever it has been unpacked to look inside. Not a source of anything: unpacked
+# copies go stale the moment the zip is rebuilt, and one already had.
+assets/game-stats/GameStats/
 
 # Downloaded OAuth client JSON and anything else handed to us out of band.
 secrets/

@@ -32,6 +32,14 @@
             android:name="com.google.android.gms.ads.APPLICATION_ID"
             android:value="${admobAppId}" />
 
+        <!-- Play Games Services will not initialise without this, and the failure is a
+             silent one: PlayGamesSdk.initialize() succeeds, the automatic sign-in never
+             happens, and isAuthenticated() simply answers false for ever. The value must
+             stay a @string reference — see the note beside it in strings.xml. -->
+        <meta-data
+            android:name="com.google.android.gms.games.APP_ID"
+            android:value="@string/game_services_project_id" />
+
         <!-- Keeps the SDK's own initialisation and ad loading off the main thread, which is
              what these two flags actually control (they do not defer initialisation — that
              is AdsManager's job, and it only initialises once consent allows it).

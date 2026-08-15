@@ -9,6 +9,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -36,6 +37,7 @@ import tech.idct.whaaack.data.parseAuthFragment
 import tech.idct.whaaack.data.str
 import tech.idct.whaaack.game.GameAssets
 import tech.idct.whaaack.game.GameEngine
+import tech.idct.whaaack.games.PlayGamesManager
 
 enum class Screen { HOME, AUTH, FORGOT, GAME, GAME_OVER, LEADERBOARD, SETTINGS, ABOUT }
 
@@ -100,6 +102,14 @@ data class UiState(
     val adPrompt: Boolean = false,
     /** A "Restore purchases" pass is in flight. It can take ten seconds; it has to show. */
     val restoringPurchases: Boolean = false,
+    /**
+     * Play Games, which is a different thing from [player]: that is the Whaaack! account the
+     * leaderboard score belongs to, this is the Play Games profile the achievements belong
+     * to. Null until the SDK's automatic attempt has resolved, for the same reason
+     * [sessionResolved] exists — offering "Sign in to Play Games" to somebody who already is
+     * would be a row that flashes up and then contradicts itself.
+     */
+    val playGamesAuthenticated: Boolean? = null,
 ) {
     /** The upsell is only offered once we know they have not already bought it. */
     val canBuyRemoveAds: Boolean get() = adsRemoved == false && removeAdsPrice != null
@@ -121,6 +131,7 @@ class WhaaackViewModel(app: Application) : AndroidViewModel(app) {
     val audio = AudioEngine(app)
     val consent = ConsentManager(app)
     val ads = AdsManager(app, BuildConfig.ADMOB_INTERSTITIAL_AD_UNIT_ID, consent)
+    val playGames = PlayGamesManager()
 
     private val entitlements = EntitlementStore(app)
     val billing = BillingManager(
@@ -217,6 +228,12 @@ class WhaaackViewModel(app: Application) : AndroidViewModel(app) {
         billing.start()
 
         viewModelScope.launch {
+            playGames.authenticated.collect { authenticated ->
+                _state.update { it.copy(playGamesAuthenticated = authenticated) }
+            }
+        }
+
+        viewModelScope.launch {
             val restored = auth.restore()
             // Both in one update: a frame that said "resolved" while `player` was still the
             // initial null is exactly the wrong-buttons flash this flag exists to prevent,
@@ -264,11 +281,24 @@ class WhaaackViewModel(app: Application) : AndroidViewModel(app) {
         navigate(Screen.GAME)
     }
 
-    fun onRunFinished(result: GameEngine.Result) {
+    fun onRunFinished(result: GameEngine.Result, activity: Activity?) {
+        // Every run, ranked or not. The leaderboard is the thing you need an account and a
+        // ranked run for; a survival milestone is a statement about what happened on this
+        // device, and refusing it to somebody playing for fun would make the achievement mean
+        // something different from what its description says. Quitting early does not need
+        // excluding either — the clock stopped where it stopped.
+        activity?.let { playGames.award(it, result.millisSurvived) }
+
         viewModelScope.launch {
             settings.recordLocalBest(result.millisSurvived)
             val prefs = _state.value.prefs
             val personalBest = maxOf(prefs.localBestMillis, result.millisSurvived)
+
+            // Reported here rather than beside the unlock above because it needs the best the
+            // run just produced, and deliberately not conditional on the unlock: a run that
+            // earns no new achievement is still a run, and every Game Stats figure — runs
+            // played, time survived, fruit whacked — is built out of these.
+            activity?.let { playGames.reportRun(it, result, personalBest) }
 
             var rank: Int? = null
             var submitError: String? = null
@@ -503,6 +533,67 @@ class WhaaackViewModel(app: Application) : AndroidViewModel(app) {
      */
     private fun adsAvailable(): Boolean =
         consent.canRequestAds && _state.value.adsRemoved == false
+
+    // ---- play games ------------------------------------------------------------------
+
+    /**
+     * Re-reads the Play Games sign-in state and back-fills anything the player has already
+     * earned. Called from `onResume`, which is both when the SDK's automatic attempt has had
+     * time to land and when a sign-in performed elsewhere — the Play Games app itself — comes
+     * back to us.
+     *
+     * The back-fill is the whole reason this is not a one-shot at startup. Runs are recorded
+     * to the device's best whether or not anything is signed in, so a player who has been
+     * playing with Play Games unavailable has a personal best sitting in preferences that
+     * nobody has claimed. Replaying it here hands them every milestone it covers the moment
+     * they are authenticated, instead of making them re-earn what they already did.
+     */
+    fun syncPlayGames(activity: Activity) {
+        playGames.refresh(activity) { authenticated ->
+            if (authenticated) awardStoredBest(activity)
+        }
+    }
+
+    /**
+     * The player asked to sign in to Play Games. A cancelled prompt is reported: they pressed
+     * a button that visibly did nothing, and Play Games gives us no way to tell a dismissal
+     * from a genuine failure, so the wording covers both without accusing them of either.
+     */
+    fun signInToPlayGames(activity: Activity) {
+        audio.blip()
+        playGames.signIn(activity) { authenticated ->
+            if (authenticated) {
+                awardStoredBest(activity)
+            } else {
+                _state.update { it.copy(toast = "Play Games sign-in didn't finish.") }
+            }
+        }
+    }
+
+    /**
+     * Awards everything the stored personal best covers.
+     *
+     * Read from preferences rather than from [UiState.prefs], which is a copy that arrives on
+     * DataStore's schedule. The first `onResume` of a cold start runs before that copy exists,
+     * so a player whose best predates all of this — anyone updating rather than installing —
+     * would have been back-filled with a zero and had to background the app once to be given
+     * what they had already earned.
+     */
+    private fun awardStoredBest(activity: Activity) = viewModelScope.launch {
+        val best = settings.flow.first().localBestMillis
+        playGames.award(activity, best)
+        // The Game Stats half of the same idea. Between them these are the whole of what a
+        // player who has been playing signed out gets back when they finally authenticate:
+        // the achievements their best already covers, and the best itself.
+        playGames.reportBest(activity, best)
+    }
+
+    fun showAchievements(activity: Activity) {
+        audio.blip()
+        playGames.openAchievements(activity) { message ->
+            _state.update { it.copy(toast = message) }
+        }
+    }
 
     // ---- settings ------------------------------------------------------------------
 

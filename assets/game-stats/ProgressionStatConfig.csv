@@ -1,0 +1,2 @@
+Stat Id,Event Property Name,Stat Display Name,Stat Description,Icon File Name,Good value direction,Unit
+best_run,currentProgress,Best Run (seconds),Your longest single run in whole seconds.,best_run.png,INCREASING,

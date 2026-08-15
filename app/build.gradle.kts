@@ -107,6 +107,36 @@ android {
 
         // Empty in release, always — the debug build type is the only place this is filled in.
         buildConfigField("String", "REMOVE_ADS_PLACEHOLDER_PRICE", "\"\"")
+
+        // Play Games Services achievement ids, as minted by the console when each of the
+        // four survival milestones was created. Public and permanent — they ship in every
+        // APK and cannot be reused after deletion — so they are committed here for the same
+        // reason the AdMob application id and `no.ads.forever` are, rather than being left
+        // to local.properties: a fresh clone and a CI runner with no secrets then award
+        // achievements instead of silently awarding nothing.
+        //
+        // Each one base64-decodes to project 964578061899 — the same id the manifest carries
+        // as `game_services_project_id` — followed by the achievement's index in creation
+        // order, which is what ties this list to that console and no other.
+        //
+        // Still overridable from local.properties or the environment, which is the way to
+        // point a build at a different console project. An id that does not resolve is not a
+        // crash: Play Games rejects the unlock, PlayGamesManager logs which milestone and
+        // which id under the `PlayGames` tag, and the game carries on. A *blank* one is
+        // skipped before it is ever sent.
+        val achievementIds = mapOf(
+            30 to "CgkIy9zUqokcEAIQAQ",
+            60 to "CgkIy9zUqokcEAIQAg",
+            90 to "CgkIy9zUqokcEAIQAw",
+            120 to "CgkIy9zUqokcEAIQBA",
+        )
+        for ((seconds, published) in achievementIds) {
+            buildConfigField(
+                "String",
+                "PGS_ACHIEVEMENT_SURVIVE_$seconds",
+                "\"${secret("PGS_ACHIEVEMENT_SURVIVE_$seconds", published)}\"",
+            )
+        }
     }
 
     signingConfigs {
@@ -186,6 +216,20 @@ android {
     }
 }
 
+/**
+ * `GameStatsTest` reads assets/game-stats/PlayerGameEvent.csv — the schema Play Games
+ * validates our uploaded events against — and fails when it and `GameStats.SCHEMA` disagree.
+ * The file lives outside this module, so without declaring it Gradle considers the test task
+ * up to date after the CSV changes and never re-runs it: the one guard against a silently
+ * discarded event would pass by not looking. Verified by editing the CSV and watching the
+ * task go from UP-TO-DATE to FAILED.
+ */
+tasks.withType<Test>().configureEach {
+    inputs.file(rootProject.file("assets/game-stats/PlayerGameEvent.csv"))
+        .withPropertyName("gameStatsEventSchema")
+        .withPathSensitivity(PathSensitivity.RELATIVE)
+}
+
 dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
@@ -208,6 +252,8 @@ dependencies {
 
     implementation(libs.play.services.ads)
     implementation(libs.user.messaging.platform)
+
+    implementation(libs.play.services.games.v2)
 
     implementation(libs.androidx.credentials)
     implementation(libs.androidx.credentials.play.services.auth)

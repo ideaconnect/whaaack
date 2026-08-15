@@ -113,6 +113,10 @@ class MainActivity : ComponentActivity() {
         // purchase completed while we were backgrounded gets picked up, and how a refund
         // that was granted elsewhere eventually lands.
         vm.onAppResumed()
+        // Play Games needs an Activity, so it is asked here rather than from the ViewModel's
+        // init: this is also the moment a sign-in made in the Play Games app itself, or the
+        // SDK's own automatic attempt at startup, has had time to land.
+        vm.syncPlayGames(this)
     }
 
     override fun onPause() {
@@ -214,7 +218,7 @@ private fun WhaaackApp(vm: WhaaackViewModel, onGoogleSignIn: () -> Unit) {
                 hapticsEnabled = state.prefs.haptics,
                 onHit = { vm.onHitFeedback() },
                 onStrike = { vm.onStrikeFeedback() },
-                onGameOver = { vm.onRunFinished(it) },
+                onGameOver = { vm.onRunFinished(it, activity) },
                 onLose = { vm.onLose() },
                 onRunInterrupted = { vm.onRunInterrupted(it) },
                 onQuitArmed = { vm.onQuitArmed() },
@@ -237,6 +241,7 @@ private fun WhaaackApp(vm: WhaaackViewModel, onGoogleSignIn: () -> Unit) {
                         vm.go(Screen.AUTH)
                     },
                     onLeaderboard = { vm.go(Screen.LEADERBOARD) },
+                    onAchievements = { activity?.let { vm.showAchievements(it) } },
                     onSettings = { vm.go(Screen.SETTINGS) },
                     onLogout = { vm.signOut() },
                     onRemoveAds = { activity?.let { vm.buyRemoveAds(it) } },
@@ -294,6 +299,8 @@ private fun WhaaackApp(vm: WhaaackViewModel, onGoogleSignIn: () -> Unit) {
                     onPrivacyOptions = { activity?.let { vm.showPrivacyOptions(it) } },
                     onRemoveAds = { activity?.let { vm.buyRemoveAds(it) } },
                     onRestorePurchases = { vm.restorePurchases() },
+                    onPlayGamesSignIn = { activity?.let { vm.signInToPlayGames(it) } },
+                    onAchievements = { activity?.let { vm.showAchievements(it) } },
                     onChangeName = { vm.changeDisplayName(it) },
                     onChangeEmail = { vm.changeEmail(it) },
                     onChangePassword = { vm.changePassword(it) },

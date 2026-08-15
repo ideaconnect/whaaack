@@ -1,4 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Whaaack!</string>
+
+    <!--
+    The Play Games Services project id — the number shown as "Project ID" beside the game's
+    name in the Play Console (Play Games Services > Setup and management > Configuration).
+    It is not a secret: it ships in every APK's manifest, like the AdMob application id.
+
+    It has to be a *string resource* referenced from the manifest rather than written into
+    android:value there. A bare 964578061899 in the manifest is read as a dimension/integer
+    attribute, which cannot hold a value this large, and the SDK then fails to find its app
+    id at runtime with an error that names neither the manifest nor the number. Quoting it
+    here is what keeps it a string all the way through.
+    -->
+    <string name="game_services_project_id" translatable="false">964578061899</string>
 </resources>

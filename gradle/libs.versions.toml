@@ -17,6 +17,13 @@ coroutines = "1.9.0"
 # the app on 3.1.0. Both libraries require minSdk 23; this app is 26.
 playServicesAds = "25.4.0"
 userMessagingPlatform = "4.0.0"
+# Play Games Services v2. The "v2" artifact is the whole point: v1's
+# play-services-games is the deprecated GoogleSignIn-based SDK, and mixing the two in one
+# app is the classic way to end up with two competing sign-in prompts. v2 signs the player
+# in by itself and has no GoogleSignInAccount anywhere in its API. Requires minSdk 19; this
+# app is 26. Its only transitive dependencies are play-services-base/basement/tasks, which
+# play-services-ads already pulls in.
+playServicesGames = "22.0.0"
 credentials = "1.3.0"
 googleid = "1.1.1"
 billing = "9.1.0"
@@ -44,6 +51,7 @@ okhttp = { group = "com.squareup.okhttp3", name = "okhttp", version.ref = "okhtt
 
 play-services-ads = { group = "com.google.android.gms", name = "play-services-ads", version.ref = "playServicesAds" }
 user-messaging-platform = { group = "com.google.android.ump", name = "user-messaging-platform", version.ref = "userMessagingPlatform" }
+play-services-games-v2 = { group = "com.google.android.gms", name = "play-services-games-v2", version.ref = "playServicesGames" }
 
 androidx-credentials = { group = "androidx.credentials", name = "credentials", version.ref = "credentials" }
 androidx-credentials-play-services-auth = { group = "androidx.credentials", name = "credentials-play-services-auth", version.ref = "credentials" }

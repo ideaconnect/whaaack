@@ -332,7 +332,24 @@ adb shell am start -a android.intent.action.VIEW \
 
 ---
 
-## 7. Before release
+## 7. Play Games Services
+
+Achievements, Game Stats and the sign-in they hang off, covered in full in
+[PLAY-GAMES.md](PLAY-GAMES.md). The app side is committed, and so are the four achievement
+ids — the console has all four, and `app/build.gradle.kts` carries them as defaults, so
+nothing needs configuring per machine. Game Stats needs two uploads that have not been made
+yet; `python tools/build_game_stats_zip.py` prepares and pre-flights them.
+
+Read §2 of that document first. The fingerprint now on the **Android** OAuth client,
+`B0:83:0D:DA:DD:E3:54:16:61:3B:B9:D1:53:30:E2:B9:D9:1A:25:0C`, is neither this machine's
+debug certificate nor the upload key — it looks like Play App Signing's, which is right for
+what players install and means **nothing built locally can authenticate** until a second
+Android client carries the debug SHA-1. That also puts a question mark over the debug Google
+sign-in recorded as working in section 3, since it is the same client.
+
+---
+
+## 8. Before release
 
 - [ ] Fix SMTP (section 2) — signup is broken without it
 - [x] Google **Android** OAuth client (section 3)
@@ -342,6 +359,10 @@ adb shell am start -a android.intent.action.VIEW \
 - [ ] Confirm the AdMob unit `…/2703686934` is of type **Interstitial** (section 4)
 - [x] Create and activate the one-time product `no.ads.forever` (section 5)
 - [ ] Run the purchase matrix from Play, with licence testers (section 5)
+- [ ] Second Android OAuth client on the debug SHA-1, so PGS works locally (section 7)
+- [x] Create the four achievements; their ids are committed (section 7)
+- [ ] Upload `PlayerGameEvent.csv` and `GameStats.zip` for Game Stats (section 7)
+- [ ] Add Play Games testers, then **publish** the PGS configuration (section 7)
 - [ ] Clear `REMOVE_ADS_PLACEHOLDER_PRICE` from `local.properties` before believing a
       pre-release build's upsell (section 5) — it is debug-only, but it is also a lie
 - [ ] Publish the privacy policy at `https://idct.tech/whaaack/privacy` (linked from About)

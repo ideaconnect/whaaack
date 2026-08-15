@@ -55,6 +55,7 @@ fun HomeScreen(
     onSignIn: () -> Unit,
     onCreateAccount: () -> Unit,
     onLeaderboard: () -> Unit,
+    onAchievements: () -> Unit,
     onSettings: () -> Unit,
     onLogout: () -> Unit,
     onRemoveAds: () -> Unit,
@@ -167,10 +168,18 @@ fun HomeScreen(
         }
 
         Spacer(Modifier.height(14.dp))
+        // Two chips at most, ever: a third splits the row into thirds and the labels start
+        // wrapping on a narrow phone. So the second slot is contested, and "Create account"
+        // wins it — someone with no account is being offered the ranked half of the game,
+        // which is worth more to them than a shortcut to a screen Settings also reaches.
+        // Once they have one, that slot is free for the achievements.
+        val offerAccount = state.sessionResolved && !state.signedIn
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             HomeChipButton("🏆  Leaderboard", Modifier.weight(1f), onLeaderboard)
-            if (state.sessionResolved && !state.signedIn) {
+            if (offerAccount) {
                 HomeChipButton("Create account", Modifier.weight(1f), onCreateAccount)
+            } else if (state.playGamesAuthenticated == true) {
+                HomeChipButton("🎖  Achievements", Modifier.weight(1f), onAchievements)
             }
         }
 

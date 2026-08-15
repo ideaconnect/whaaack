@@ -50,6 +50,13 @@ class GameEngine(private val random: Random = Random.Default) {
     data class Result(
         val millisSurvived: Long,
         val hits: Int,
+        /**
+         * Fruit that escaped — which is exactly what a strike is, one per lapse. Never more
+         * than [MAX_STRIKES], because the third one ends the run; below it only on a run the
+         * player quit. Carried so Play Games Services can be told how a run actually went,
+         * not just how long it lasted.
+         */
+        val strikes: Int,
         val topSpeedLevel: Int,
         val ranked: Boolean,
         /** True when the player ended the run themselves rather than losing it. */
@@ -515,6 +522,7 @@ class GameEngine(private val random: Random = Random.Default) {
         result = Result(
             millisSurvived = elapsedMs,
             hits = hits,
+            strikes = strikes,
             topSpeedLevel = level,
             ranked = ranked,
             quit = quit,

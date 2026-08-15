@@ -1,0 +1,7 @@
+Stat Id,Event Name,Event Property Name,Aggregation Type,Stat Display Name,Stat Description,Filter Property,Filter Operator,Filter Value,Is Competitive,Min limit,Max limit,Icon File Name,Good value direction,Unit
+runs_played,run_completed,survived_ms,COUNT,Runs Played,"Every run you have finished in the orchard, however it ended.",,,,FALSE,,,runs_played.png,INCREASING,
+time_survived,run_completed,survived_seconds,SUM,Time Survived (seconds),"Every second you have spent surviving the orchard, added up.",,,,FALSE,,,time_survived.png,INCREASING,
+fruit_whacked,run_completed,fruit_hit,SUM,Fruit Whacked,"Fruit hit before it could escape, across every run you have played.",,,,FALSE,,,fruit_whacked.png,INCREASING,
+top_speed_reached,run_completed,top_speed,MAX,Top Speed Reached,"The fastest the orchard has ever thrown fruit at you while you were still standing.",,,,FALSE,,,top_speed_reached.png,INCREASING,
+minute_runs,run_completed,survived_seconds,COUNT,Minute Runs,"Runs that lasted a full minute or longer.",survived_seconds,>=,60,FALSE,,,minute_runs.png,INCREASING,
+ranked_runs,run_completed,survived_ms,COUNT,Ranked Runs,"Runs played for the leaderboard, with an account signed in.",ranked,=,TRUE,FALSE,,,ranked_runs.png,INCREASING,

@@ -55,6 +55,8 @@ fun SettingsScreen(
     onPrivacyOptions: () -> Unit,
     onRemoveAds: () -> Unit,
     onRestorePurchases: () -> Unit,
+    onPlayGamesSignIn: () -> Unit,
+    onAchievements: () -> Unit,
     onChangeName: (String) -> Unit,
     onChangeEmail: (String) -> Unit,
     onChangePassword: (String) -> Unit,
@@ -134,6 +136,27 @@ fun SettingsScreen(
                     busyHint = "Checking with Google Play…",
                     onClick = onRestorePurchases,
                 )
+
+                // Nothing at all while the Play Games SDK is still resolving its automatic
+                // sign-in: the two rows below say opposite things, and showing the wrong one
+                // for a frame is how a settings screen ends up looking like it lied.
+                state.playGamesAuthenticated?.let { authenticated ->
+                    Spacer(Modifier.height(10.dp))
+                    SectionLabel("Play Games")
+                    if (authenticated) {
+                        ActionRow(
+                            "Achievements",
+                            "Your survival milestones",
+                            onClick = onAchievements,
+                        )
+                    } else {
+                        ActionRow(
+                            "Sign in to Play Games",
+                            "Track achievements on your Google account",
+                            onClick = onPlayGamesSignIn,
+                        )
+                    }
+                }
 
                 if (privacyOptionsRequired) {
                     Spacer(Modifier.height(10.dp))

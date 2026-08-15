@@ -1,0 +1,8 @@
+Event Name,Property Name,Property Type
+run_completed,survived_ms,INT64
+run_completed,survived_seconds,INT64
+run_completed,fruit_hit,INT64
+run_completed,fruit_missed,INT64
+run_completed,top_speed,INT64
+run_completed,ranked,BOOL
+progressUpdate,currentProgress,INT64
