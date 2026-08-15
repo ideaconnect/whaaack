@@ -27,13 +27,13 @@ W, H = 1080, 1920
 # Source frame -> output name. The order is the order Play shows them in, so it reads as a
 # run: the orchard, the countdown, play, the mistake, the score, the board.
 SHOTS = [
-    ("01_home_phone.png", "01-home"),
+    ("01_home_adfree.png", "01-home"),
     ("02_countdown.png", "02-countdown"),
     ("03_early.png", "03-first-fruit"),
     ("04_splats.png", "04-splats"),
     ("06_late.png", "05-faster"),
     ("strike_03.png", "06-strike"),
-    ("07_gameover.png", "07-game-over"),
+    ("07_gameover_adfree.png", "07-game-over"),
     ("08_leaderboard.png", "08-leaderboard"),
 ]
 
