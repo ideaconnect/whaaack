@@ -2,8 +2,14 @@
 
 A pass over the two paths where a defect costs something that cannot be re-earned by playing
 better: the ad-free purchase, and getting into an account. Everything below marked **Fixed**
-is done and building — `:app:testDebugUnitTest` passes (50 tests, 9 of them new) and
+is done and building — `:app:testDebugUnitTest` passes (59 tests, 14 of them new) and
 `:app:compileReleaseKotlin` is clean.
+
+A second pass the same day re-verified findings 1–4 against the committed code, confirmed
+one claim this document had been taking on faith (that the billing pass budget can actually
+interrupt a lost Play callback — it can: billing-ktx 9.1.0 implements its suspend extensions
+on `CompletableDeferred.await()`, which is cancellable), found finding 5, and wrote the
+mockwebserver tests the first pass left as the top item on the open list.
 
 Scope: `BillingManager`, `EntitlementStore`, `AdsManager`, `ConsentManager` and the purchase
 UI; `SupabaseClient`, `SessionStore`, `AuthRepository`, the auth deep link, Google sign-in
@@ -118,6 +124,41 @@ Play re-reports the purchase next pass, and an interrupted acknowledgement is re
 later pass for the three days Play allows.
 ([BillingManager.kt](../app/src/main/java/tech/idct/whaaack/billing/BillingManager.kt))
 
+### 5. A transient token-endpoint failure destroyed the session — **Fixed**
+
+Found on the second pass, in the fix for finding 1, while writing the test that finding said
+it deserved. `refreshSession` answered *any* failure of the refresh POST with null. For a
+400–403 that is right — the server has looked at the refresh token and said no, the session
+is over, and the store is cleared to agree. But a 503 from an outage, or a 429 from the rate
+limit Supabase applies to `/auth/v1/token`, got the same null — and null makes `request`
+rethrow the original 401, which `refreshProfile` reads (correctly, now) as a session that has
+already survived a refresh attempt and cannot be saved. It responds by **clearing the stored
+session**. One bad moment for the token endpoint, and a player whose refresh token was
+perfectly good is signed out for keeps — the very outcome finding 1 existed to prevent,
+arriving through the servers' good door instead of the bad one.
+
+The same null also fed the anon-key fallback: an account change attempted while the stored
+token was expired and the token endpoint was down went out with the anon key, PostgREST
+answered the PATCH with an empty row set, and "Display name updated" was toasted over a
+server that changed nothing — finding 3's ghost success, back through a different door.
+
+`refreshSession` now throws for anything outside 400..403 instead of returning null, so a
+refresh that says nothing about the refresh token reads as what it is — an outage — and
+never as "no session". `refreshProfile` already treats a non-401 failure as "keep the
+session, the cached name is merely stale", so the player rides out the outage signed in.
+([SupabaseClient.kt](../app/src/main/java/tech/idct/whaaack/data/SupabaseClient.kt))
+
+To make this testable on the JVM, `SessionStore` became an interface —
+[DataStoreSessionStore](../app/src/main/java/tech/idct/whaaack/data/Session.kt) on the
+device, an in-memory store in tests — and
+[SupabaseClientTest](../app/src/test/java/tech/idct/whaaack/data/SupabaseClientTest.kt) now
+runs five mockwebserver tests over the whole 401 recovery path: the forced refresh spends
+the refresh token and retries with the minted pair (finding 1's regression test), a
+definitive rejection clears the session and keeps the original 401, a 503 and a 429 both
+leave the session standing, and a token past its stored expiry refreshes before the request
+goes out. This closes what the first pass left as the highest-value item on the testing
+list, and finding it is what the closing bought.
+
 ---
 
 ## Checked and sound
@@ -179,6 +220,7 @@ their reasoning, and this review found no reason to move any of them:
   hour later fails to show — handled gracefully, but the impression is wasted and the ad-break
   prompt will have been raised in front of it.
 - **Paying players still see the consent form**, and the ad-privacy row stays in Settings.
-- **The 401-refresh-retry has no mockwebserver test.** Finding 1 above is precisely the sort of
-  defect a test would have caught the day it was written, and it is now the highest-value item
-  left in the testing list.
+
+The first pass listed a fifth item here — that the 401-refresh-retry had no mockwebserver
+test. Writing that test found finding 5, which is the argument for it made better than the
+listing ever was.

@@ -1268,7 +1268,9 @@ these are the structural and delivery problems in `website/` and `.github/workfl
 
 ## 7. Testing and QA
 
-`GameEngineTest` is the only test file in the repo, against 6,700 lines of main source.
+There are five test files in the repo — `GameEngineTest`, `AuthLinkTest`, `AuthErrorTest`,
+`SupabaseClientTest` and `WeekLabelTest`, 59 tests between them — against 6,700 lines of main
+source, and no `androidTest` source set at all.
 
 - [ ] **Define and run a manual QA matrix** 🟡
   The README says the app is "working and verified on device" — on one device, informally. Write
@@ -1304,13 +1306,18 @@ these are the structural and delivery problems in `website/` and `.github/workfl
   inside a value, and recovery vs nothing-to-do. The extraction was not bookkeeping: the shape it
   made testable — an error fragment with no tokens in it — was being dropped silently, which is
   what an expired reset link looks like; **leaderboard parsing**, which uses `mapNotNull` keyed on
-  `rank` so an RPC shape change silently yields an empty board rather than an error; and **the
-  401-refresh-retry in `SupabaseClient`**, with mockwebserver, proving the single retry, that a
-  400–403 on refresh clears the session, and that a 5xx does not. Note the retry itself was
-  **broken until 2026-08-15** and is worth a test for that reason above the others: it re-sent the
-  token that had just been rejected, because `refreshSession()` short-circuits on a stored expiry
-  that has not passed. Test the forced path specifically — a 401 on a token the client still
-  believes is current must spend the refresh token, not repeat itself.
+  `rank` so an RPC shape change silently yields an empty board rather than an error; and ~~**the
+  401-refresh-retry in `SupabaseClient`**~~ — **done** (2026-08-15): `SessionStore` is now an
+  interface (`DataStoreSessionStore` on device, in-memory in tests) and `SupabaseClientTest` runs
+  five mockwebserver tests over exactly the demands this item made — the forced path (a 401 on a
+  token the client still believes current spends the refresh token and retries with the minted
+  pair), a 400–403 on refresh clearing the session and keeping the original 401, and a 5xx *not*
+  clearing it. That last demand was not yet true when the test was written: a transient failure of
+  the token endpoint (a 503, or a 429 from its rate limit) returned null, which rethrew the
+  original 401, which `refreshProfile` answered by destroying a session whose refresh token was
+  fine. `refreshSession` now propagates any non-400..403 failure instead, so no caller can mistake
+  an outage for a dead session. Two of the four modules remain: **BillingManager.refresh()** and
+  the leaderboard parsing.
 
 - [ ] **Make the Compose menus usable with TalkBack and meet the 48dp floor** 🟡
   There are exactly two `contentDescription` usages in the whole app, no `semantics` block, no
@@ -1504,7 +1511,8 @@ these are the structural and delivery problems in `website/` and `.github/workfl
   tapers in the endgame, where near-simultaneous arrivals are the point. Simulated across
   skill levels, every rate now terminates: 6.5/s at ~108s, 8/s at ~132s, 12/s at ~172s,
   15/s at ~200s. The property is guarded by
-  `the spawn gap yields to the ladder instead of capping it`.
+  `the spawn gap yields to the ladder instead of capping it`. 59 unit tests pass
+  (`GameEngineTest` is 36 of them).
 
 - [x] **Give the weekly leaderboard a visible reset** — **done; the "payoff" half declined**
   `current_week_start()` is Monday 00:00 UTC and the UI exposes Weekly as a tab with an honest

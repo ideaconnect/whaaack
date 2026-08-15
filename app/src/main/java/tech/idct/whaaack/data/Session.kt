@@ -33,12 +33,19 @@ data class Session(
             val refresh = root.str("refresh_token") ?: return@runCatching null
             val expiresIn = root.str("expires_in")?.toLongOrNull() ?: 3600L
             val user = root["user"]?.jsonObject
+            // No usable account id means no usable session. It used to fall through as an
+            // empty string, and a Session with an empty user id is worse than none: every
+            // later profile read and write becomes `?id=eq.`, which PostgREST answers with a
+            // 400, and only a 401 signs the player out — so they stay signed in and
+            // permanently broken. `getAs` exists to keep exactly this off the deep-link path;
+            // the token grants deserve the same guard rather than a second cure.
+            val userId = user?.str("id")?.takeIf { it.isNotBlank() } ?: return@runCatching null
             val meta = user?.get("user_metadata")?.jsonObject
             Session(
                 accessToken = access,
                 refreshToken = refresh,
                 expiresAtMs = System.currentTimeMillis() + expiresIn * 1000,
-                userId = user?.str("id").orEmpty(),
+                userId = userId,
                 email = user?.str("email"),
                 provider = user?.get("app_metadata")?.jsonObject?.str("provider") ?: "email",
                 // A starting point only; the profiles table is the authority and overwrites
@@ -56,8 +63,28 @@ internal fun JsonElement.str(key: String): String? = (this as? JsonObject)?.str(
 
 private val Context.sessionDataStore by preferencesDataStore(name = "whaaack_session")
 
-/** Persists the signed-in session across launches. */
-class SessionStore(private val context: Context) {
+/**
+ * Persists the signed-in session across launches.
+ *
+ * An interface so [SupabaseClient]'s refresh arithmetic — the part of the login that has
+ * actually been wrong — can be exercised on the JVM against an in-memory store; the
+ * DataStore implementation needs Android.
+ */
+interface SessionStore {
+    suspend fun current(): Session?
+    suspend fun save(session: Session)
+
+    /**
+     * Updates only the cached name. A read-modify-write of the whole [Session] would race
+     * the token refresh that runs on the same store and could put a rotated refresh token
+     * back to its previous value.
+     */
+    suspend fun saveDisplayName(name: String)
+    suspend fun clear()
+}
+
+/** The on-device [SessionStore], excluded from backup by construction (see backup_rules). */
+class DataStoreSessionStore(private val context: Context) : SessionStore {
 
     private val keyAccess = stringPreferencesKey("access_token")
     private val keyRefresh = stringPreferencesKey("refresh_token")
@@ -67,7 +94,7 @@ class SessionStore(private val context: Context) {
     private val keyProvider = stringPreferencesKey("provider")
     private val keyDisplayName = stringPreferencesKey("display_name")
 
-    suspend fun current(): Session? {
+    override suspend fun current(): Session? {
         val prefs = context.sessionDataStore.data.first()
         val access = prefs[keyAccess] ?: return null
         val refresh = prefs[keyRefresh] ?: return null
@@ -82,7 +109,7 @@ class SessionStore(private val context: Context) {
         )
     }
 
-    suspend fun save(session: Session) {
+    override suspend fun save(session: Session) {
         context.sessionDataStore.edit { prefs ->
             prefs[keyAccess] = session.accessToken
             prefs[keyRefresh] = session.refreshToken
@@ -96,19 +123,14 @@ class SessionStore(private val context: Context) {
         }
     }
 
-    /**
-     * Updates only the cached name. A read-modify-write of the whole [Session] would race
-     * the token refresh that runs on the same store and could put a rotated refresh token
-     * back to its previous value.
-     */
-    suspend fun saveDisplayName(name: String) {
+    override suspend fun saveDisplayName(name: String) {
         context.sessionDataStore.edit { prefs ->
             // Never resurrect a session that was signed out while the profile was in flight.
             if (prefs[keyAccess] != null) prefs[keyDisplayName] = name
         }
     }
 
-    suspend fun clear() {
+    override suspend fun clear() {
         context.sessionDataStore.edit { it.clear() }
     }
 }

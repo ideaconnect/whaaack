@@ -23,13 +23,13 @@ import tech.idct.whaaack.data.AuthRepository
 import tech.idct.whaaack.data.AuthResultException
 import tech.idct.whaaack.data.BoardRow
 import tech.idct.whaaack.data.BoardScope
+import tech.idct.whaaack.data.DataStoreSessionStore
 import tech.idct.whaaack.data.EntitlementStore
 import tech.idct.whaaack.data.GameSettings
 import tech.idct.whaaack.data.LeaderboardRepository
 import tech.idct.whaaack.data.Player
 import tech.idct.whaaack.data.Preferences
 import tech.idct.whaaack.data.Session
-import tech.idct.whaaack.data.SessionStore
 import tech.idct.whaaack.data.Standing
 import tech.idct.whaaack.data.SupabaseClient
 import tech.idct.whaaack.data.parseAuthFragment
@@ -113,7 +113,7 @@ class WhaaackViewModel(app: Application) : AndroidViewModel(app) {
     private val supabase = SupabaseClient(
         baseUrl = BuildConfig.SUPABASE_URL,
         anonKey = BuildConfig.SUPABASE_ANON_KEY,
-        sessions = SessionStore(app),
+        sessions = DataStoreSessionStore(app),
     )
     private val auth = AuthRepository(supabase)
     private val leaderboard = LeaderboardRepository(supabase)

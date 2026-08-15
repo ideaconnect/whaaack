@@ -157,6 +157,11 @@ class SupabaseClient(
      * stored token is now inside its lifetime, the reactive one whether it is a *different*
      * token from the one that failed — a token that has already been replaced is worth
      * retrying with, and re-spending the refresh token on it is not.
+     *
+     * Returns null only when there is nothing to refresh: no session, or a refresh token the
+     * server rejected outright (which also clears the store). A failure that says nothing
+     * about the token — an outage, a rate limit — is thrown instead, so no caller can
+     * mistake it for a dead session.
      */
     suspend fun refreshSession(rejected: String? = null): Session? = refreshLock.withLock {
         val existing = sessions.current() ?: return null
@@ -170,11 +175,34 @@ class SupabaseClient(
         val raw = try {
             request("POST", "/auth/v1/token?grant_type=refresh_token", payload)
         } catch (e: SupabaseException) {
-            // A rejected refresh token means the session is gone for good.
-            if (e.status in 400..403) sessions.clear()
-            return null
+            // A definitive rejection — 400..403 — means the refresh token itself is dead and
+            // the session is gone for good. Anything else (a 5xx outage, a 429 from the token
+            // endpoint's rate limit) says nothing about the refresh token, so it must
+            // propagate rather than read as "no session": null here made the 401 path above
+            // rethrow the original 401, which refreshProfile takes as proof the session is
+            // unrecoverable and *clears it* — a momentary server hiccup turned into a
+            // permanent sign-out. Null also feeds the anon-key fallback, whose empty-rowset
+            // "success" is the ghost the account changes were just cured of.
+            if (e.status in 400..403) {
+                sessions.clear()
+                return null
+            }
+            throw e
         }
-        val session = Session.fromTokenResponse(json, raw) ?: return null
+        // A 2xx carrying nothing usable is not an answer about the refresh token either, so
+        // it takes the same road as an outage. Returning null here was the last way into the
+        // failure the range above was narrowed to close: `request` would rethrow the original
+        // 401, `refreshProfile` would read that as a session beyond saving, and a player whose
+        // refresh token was perfectly good would be signed out for keeps — this time over a
+        // truncated or proxy-mangled body rather than a server error. `execute` hands a 204 or
+        // an empty body back as "", which parses to null, so this is not a hypothetical shape.
+        // The store is deliberately left alone: nothing here says the refresh token is spent.
+        val session = Session.fromTokenResponse(json, raw)
+            ?: throw SupabaseException(
+                status = 502,
+                errorCode = null,
+                message = "The sign-in service returned a response with no session in it.",
+            )
         sessions.save(session)
         return session
     }

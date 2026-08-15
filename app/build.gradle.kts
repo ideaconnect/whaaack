@@ -217,4 +217,5 @@ dependencies {
 
     // GameEngine is deliberately free of Android types, so its rules are testable on the JVM.
     testImplementation(libs.junit)
+    testImplementation(libs.mockwebserver)
 }
