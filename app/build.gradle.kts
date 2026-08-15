@@ -65,8 +65,8 @@ android {
         // thread gets a GPU-backed Canvas. See GameSurfaceView.
         minSdk = 26
         targetSdk = 36
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 2
+        versionName = "Zdzichu"
 
         // The AdMob application id is not a secret — it ships in every APK's manifest.
         manifestPlaceholders["admobAppId"] = secret(
