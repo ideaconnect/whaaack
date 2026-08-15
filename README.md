@@ -98,6 +98,7 @@ tools/          launcher-icon generator (Pillow + numpy)
 docs/SETUP.md   credentials, Google OAuth, AdMob consent, release checklist
 docs/GO-TO-PRODUCTION-TECHNICAL.md      what is left in the repo before release
 docs/GO-TO-PRODUCTION-NON-TECHNICAL.md  what is left in a console or a contract
+docs/REVIEW-MONEY-AND-LOGIN.md          the purchase and account paths, reviewed
 ```
 
 ## The website

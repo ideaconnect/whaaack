@@ -31,6 +31,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withTimeoutOrNull
 import tech.idct.whaaack.data.EntitlementStore
 import java.security.MessageDigest
 import kotlin.coroutines.resume
@@ -360,12 +361,37 @@ class BillingManager(
 
     // ---- the one decision ----------------------------------------------------------
 
+    /**
+     * One pass, under the gate and under a deadline.
+     *
+     * Every await inside a pass is a callback from the Play Store app, and a callback that
+     * never arrives has nowhere to be noticed: the pass parks on the mutex for ever, every
+     * later pass queues behind it, and "Restore purchases" — the control a player reaches for
+     * precisely when they have paid and the app disagrees — keeps its spinner for the rest of
+     * the session and refuses further taps. The budget turns that into the answer this class
+     * already knows how to give: [Check.Unknown], which grants nothing, takes nothing away,
+     * and leaves the stored entitlement standing.
+     *
+     * Deliberately far longer than any legitimate pass. Restoring against an unreachable Play
+     * takes the better part of ten seconds, and an unacknowledged purchase adds a retry loop
+     * with six seconds of backoff in it; this is a deadlock breaker, not a latency budget.
+     */
     private suspend fun refresh(trigger: String): Check = gate.withLock {
+        withTimeoutOrNull(PASS_BUDGET_MS) { pass() }
+            ?: conclude(
+                Check.Unknown(
+                    BillingClient.BillingResponseCode.SERVICE_DISCONNECTED,
+                    "timeout:$trigger",
+                ),
+            )
+    }
+
+    private suspend fun pass(): Check {
         val seq = ++passSeq
 
         val setup = connect()
         if (setup.responseCode != BillingClient.BillingResponseCode.OK) {
-            return@withLock conclude(Check.Unknown(setup.responseCode, "setup"))
+            return conclude(Check.Unknown(setup.responseCode, "setup"))
         }
 
         val onlineBefore = probe()
@@ -377,7 +403,7 @@ class BillingManager(
         )
         val code = purchases.billingResult.responseCode
         if (code != BillingClient.BillingResponseCode.OK) {
-            return@withLock conclude(Check.Unknown(code, "query"))
+            return conclude(Check.Unknown(code, "query"))
         }
 
         // getProducts(), not the legacy skus, and `contains` rather than equality: a single
@@ -387,21 +413,21 @@ class BillingManager(
         when {
             mine != null && mine.purchaseState == Purchase.PurchaseState.PURCHASED -> {
                 handlePurchase(mine)
-                return@withLock conclude(Check.Owned)
+                return conclude(Check.Owned)
             }
 
             // Payment not secured yet. Grants nothing, and must not disturb what the player
             // already has.
             mine != null && mine.purchaseState == Purchase.PurchaseState.PENDING -> {
                 store.clearNotOwnedStreak()
-                return@withLock conclude(Check.Pending)
+                return conclude(Check.Pending)
             }
 
             // UNSPECIFIED_STATE: a purchase object exists but says nothing. Absence of
             // information is not a negative.
             mine != null -> {
                 store.clearNotOwnedStreak()
-                return@withLock conclude(Check.Unknown(code, "unspecified-state"))
+                return conclude(Check.Unknown(code, "unspecified-state"))
             }
         }
 
@@ -413,11 +439,11 @@ class BillingManager(
         val onlineProven = onlineBefore && (!holding || probe())
 
         if (!onlineProven) {
-            return@withLock conclude(Check.Unknown(code, "no-proof-of-network"))
+            return conclude(Check.Unknown(code, "no-proof-of-network"))
         }
         if (!holding) {
             // Nothing to take away; do not touch the confirmation counter.
-            return@withLock conclude(Check.NotOwned)
+            return conclude(Check.NotOwned)
         }
 
         // Returning from Play's sheet fires onResume before PurchasesUpdatedListener, so a
@@ -436,7 +462,7 @@ class BillingManager(
         if (purchaseLaunchedAtMs != 0L &&
             SystemClock.elapsedRealtime() - purchaseLaunchedAtMs < PURCHASE_SETTLE_MS
         ) {
-            return@withLock conclude(Check.Unknown(0, "purchase-in-flight"))
+            return conclude(Check.Unknown(0, "purchase-in-flight"))
         }
 
         // Verified online, Play said OK, the product is genuinely absent, and we currently
@@ -450,7 +476,7 @@ class BillingManager(
         // fail the same way, and the "two verified-online negatives" rule collapsed into
         // one. It also stops a player double-tapping Restore into a revocation.
         if (confirmedNotOwnedThisProcess) {
-            return@withLock conclude(Check.NotOwned)
+            return conclude(Check.NotOwned)
         }
         val streak = store.bumpNotOwnedStreak()
         confirmedNotOwnedThisProcess = true
@@ -458,11 +484,11 @@ class BillingManager(
             // Not Unknown: Play was reached and answered. Reporting this as "couldn't check"
             // told a player tapping Restore that nothing had changed, while a counter that
             // can end their entitlement had just moved.
-            return@withLock conclude(Check.NotOwned)
+            return conclude(Check.NotOwned)
         }
 
         revoke(seq)
-        return@withLock conclude(Check.NotOwned)
+        return conclude(Check.NotOwned)
     }
 
     private suspend fun conclude(check: Check): Check {
@@ -565,6 +591,9 @@ class BillingManager(
 
         /** How long after opening Play's sheet a revoke is suppressed. */
         const val PURCHASE_SETTLE_MS = 60_000L
+
+        /** Ceiling on a single entitlement pass, so a lost Play callback cannot wedge them all. */
+        const val PASS_BUDGET_MS = 45_000L
 
         const val ACK_ATTEMPTS = 3
     }

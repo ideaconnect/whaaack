@@ -1297,12 +1297,19 @@ these are the structural and delivery problems in `website/` and `.github/workfl
   `GameEngineTest` is genuinely good work — 15 tests covering the pause/resume clock, taps,
   quit/loss reporting, splat expiry, the target ladder and the curve. It is also the only test file
   against 6,700 lines of main source. In order of blast radius: **BillingManager.refresh()** (see
-  §5); **deep-link fragment parsing**, currently inline in the ViewModel and therefore untestable —
-  extract `parseAuthFragment(String?)` and test percent-decoding, `error_description`, blank tokens,
-  a missing `expires_in`, an `=` inside a value, and recovery vs confirmation; **leaderboard
-  parsing**, which uses `mapNotNull` keyed on `rank` so an RPC shape change silently yields an empty
-  board rather than an error; and **the 401-refresh-retry in `SupabaseClient`**, with mockwebserver,
-  proving the single retry, that a 400–403 on refresh clears the session, and that a 5xx does not.
+  §5); ~~**deep-link fragment parsing**~~ — **done** (see the money-and-login review): extracted as
+  `parseAuthFragment(String?)` into `data/AuthLink.kt` and covered by `AuthLinkTest`, nine tests
+  over percent-decoding, `error_description`, half a token pair, a missing `expires_in`, an `=`
+  inside a value, and recovery vs nothing-to-do. The extraction was not bookkeeping: the shape it
+  made testable — an error fragment with no tokens in it — was being dropped silently, which is
+  what an expired reset link looks like; **leaderboard parsing**, which uses `mapNotNull` keyed on
+  `rank` so an RPC shape change silently yields an empty board rather than an error; and **the
+  401-refresh-retry in `SupabaseClient`**, with mockwebserver, proving the single retry, that a
+  400–403 on refresh clears the session, and that a 5xx does not. Note the retry itself was
+  **broken until 2026-08-15** and is worth a test for that reason above the others: it re-sent the
+  token that had just been rejected, because `refreshSession()` short-circuits on a stored expiry
+  that has not passed. Test the forced path specifically — a 401 on a token the client still
+  believes is current must spend the refresh token, not repeat itself.
 
 - [ ] **Make the Compose menus usable with TalkBack and meet the 48dp floor** 🟡
   There are exactly two `contentDescription` usages in the whole app, no `semantics` block, no

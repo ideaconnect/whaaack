@@ -59,6 +59,21 @@ sealed class AuthError(val title: String, val body: String) {
     )
 
     /**
+     * There is no session behind this request at all — the refresh token was rejected and the
+     * client dropped it, or the player signed out in another window of the same process.
+     *
+     * Distinct from [NeedsRecentSignIn], which is a session that exists and is merely too old
+     * for one particular operation. Naming it matters because the alternative was worse than a
+     * bad message: an account change with no session used to return without doing anything and
+     * without saying anything, so [tech.idct.whaaack.WhaaackViewModel] counted it a success and
+     * toasted "Display name updated" over a server that had never been asked.
+     */
+    data object SessionExpired : AuthError(
+        "You're signed out",
+        "Your session ended. Sign in again, then make the change.",
+    )
+
+    /**
      * GoTrue's `secure_password_change` refuses a password change on a session older than a
      * day unless it carries a reauthentication nonce. The app sends no nonce, so this is what
      * a returning player gets — and the copy has to be actionable, because signing out and
@@ -203,7 +218,7 @@ class AuthRepository(private val client: SupabaseClient) {
     }
 
     suspend fun updateDisplayName(newName: String) {
-        val session = client.currentSession() ?: return
+        val session = requireSession()
         val payload = buildJsonObject { put("display_name", JsonPrimitive(newName.trim())) }
         call {
             client.request(
@@ -221,23 +236,46 @@ class AuthRepository(private val client: SupabaseClient) {
     }
 
     suspend fun updateEmail(newEmail: String) {
+        requireSession()
         val payload = buildJsonObject { put("email", JsonPrimitive(newEmail.trim())) }
         call { client.request("PUT", "/auth/v1/user", payload, authorized = true) }
     }
 
     suspend fun updatePassword(newPassword: String) {
         if (!isStrongPassword(newPassword)) throw AuthResultException(AuthError.WeakPassword)
+        requireSession()
         val payload = buildJsonObject { put("password", JsonPrimitive(newPassword)) }
         call { client.request("PUT", "/auth/v1/user", payload, authorized = true) }
     }
 
     suspend fun deleteAccount() {
+        requireSession()
         call { client.request("POST", "/rest/v1/rpc/delete_my_account", authorized = true) }
         client.clearSession()
         _player.value = null
     }
 
     // ---- internals -----------------------------------------------------------------
+
+    /**
+     * The session every account change needs, or a refusal the player can act on.
+     *
+     * Not a formality. [SupabaseClient] falls back to the anon key when an authorized request
+     * has no token, which PostgREST answers with an empty row set rather than a 401 — so a
+     * signed-out PATCH reads as a perfectly successful change of nothing. The one case that
+     * did check simply returned, which the ViewModel counted as a success and reported as one.
+     *
+     * Signing the player out here as well as refusing is the honest half: if the session is
+     * gone, the account row on screen is describing somebody who is no longer signed in.
+     */
+    private suspend fun requireSession(): Session {
+        val session = client.currentSession()
+        if (session == null) {
+            _player.value = null
+            throw AuthResultException(AuthError.SessionExpired)
+        }
+        return session
+    }
 
     private suspend fun loadProfile(session: Session) {
         val raw = client.request(

@@ -117,8 +117,16 @@ class SupabaseClient(
         return try {
             attempt(token)
         } catch (e: SupabaseException) {
-            if (authorized && e.status == 401) {
-                token = refreshSession()?.accessToken ?: throw e
+            // A 401 against a token we believed was current means the server disagrees with
+            // our expiry arithmetic: the device clock moved, the project's JWT secret was
+            // rotated, or the session was ended elsewhere. The refresh has to be *forced*
+            // here — asking politely returns the very token that was just rejected, because
+            // by the stored expiry it is still fresh, and the retry is then a guaranteed
+            // second 401. AuthRepository reads that as a session beyond saving and signs the
+            // player out, having never once offered the refresh token that would have
+            // rescued it.
+            if (authorized && token != null && e.status == 401) {
+                token = refreshSession(rejected = token)?.accessToken ?: throw e
                 attempt(token)
             } else {
                 throw e
@@ -136,10 +144,27 @@ class SupabaseClient(
         return refreshSession()?.accessToken
     }
 
-    suspend fun refreshSession(): Session? = refreshLock.withLock {
+    /**
+     * Mints a new access token from the refresh token.
+     *
+     * [rejected] is the access token the server just answered 401 to, and it switches this
+     * from "refresh if it looks expired" to "refresh because the server said no" — the stored
+     * expiry cannot be trusted in that case, since disagreeing with it is the whole reason we
+     * are here.
+     *
+     * Both forms still have to survive another caller refreshing while this one waited on the
+     * lock; they just ask a different question about it. The proactive path asks whether the
+     * stored token is now inside its lifetime, the reactive one whether it is a *different*
+     * token from the one that failed — a token that has already been replaced is worth
+     * retrying with, and re-spending the refresh token on it is not.
+     */
+    suspend fun refreshSession(rejected: String? = null): Session? = refreshLock.withLock {
         val existing = sessions.current() ?: return null
-        // Another caller may have refreshed while we waited on the lock.
-        if (existing.expiresAtMs - 60_000L > System.currentTimeMillis()) return existing
+        if (rejected != null) {
+            if (existing.accessToken != rejected) return existing
+        } else if (existing.expiresAtMs - 60_000L > System.currentTimeMillis()) {
+            return existing
+        }
 
         val payload = buildJsonObject { put("refresh_token", JsonPrimitive(existing.refreshToken)) }
         val raw = try {

@@ -18,6 +18,7 @@ import tech.idct.whaaack.ads.ConsentManager
 import tech.idct.whaaack.audio.AudioEngine
 import tech.idct.whaaack.billing.BillingManager
 import tech.idct.whaaack.data.AuthError
+import tech.idct.whaaack.data.AuthLink
 import tech.idct.whaaack.data.AuthRepository
 import tech.idct.whaaack.data.AuthResultException
 import tech.idct.whaaack.data.BoardRow
@@ -31,10 +32,10 @@ import tech.idct.whaaack.data.Session
 import tech.idct.whaaack.data.SessionStore
 import tech.idct.whaaack.data.Standing
 import tech.idct.whaaack.data.SupabaseClient
+import tech.idct.whaaack.data.parseAuthFragment
 import tech.idct.whaaack.data.str
 import tech.idct.whaaack.game.GameAssets
 import tech.idct.whaaack.game.GameEngine
-import java.net.URLDecoder
 
 enum class Screen { HOME, AUTH, FORGOT, GAME, GAME_OVER, LEADERBOARD, SETTINGS, ABOUT }
 
@@ -646,22 +647,29 @@ class WhaaackViewModel(app: Application) : AndroidViewModel(app) {
     /**
      * Handles the `whaaack://auth#...` callback Supabase sends for password recovery and
      * email confirmation. The tokens ride in the URL fragment, not the query.
+     *
+     * A link that cannot be used is *said out loud*. An expired or already-used one comes back
+     * carrying an error instead of tokens, and answering that with silence — which is what
+     * returning early amounted to — leaves the player watching the app come to the front and
+     * do nothing, with no way to tell that the link was at fault rather than the app.
+     *
+     * A failure deliberately does not navigate. The link brings the app to the foreground
+     * whatever it was doing, and pulling someone out of a live run to show them a dead link is
+     * a worse answer than the toast.
      */
     fun handleAuthDeepLink(fragment: String?) {
-        val params = fragment
-            ?.split('&')
-            ?.mapNotNull { part ->
-                val idx = part.indexOf('=')
-                if (idx <= 0) null else decode(part.substring(0, idx)) to decode(part.substring(idx + 1))
-            }
-            ?.toMap()
-            ?: return
+        when (val link = parseAuthFragment(fragment)) {
+            is AuthLink.Ignored -> return
+            is AuthLink.Failed -> _state.update { it.copy(toast = link.message) }
+            is AuthLink.Tokens -> adoptAuthLink(link)
+        }
+    }
 
-        val access = params["access_token"] ?: return
-        val refresh = params["refresh_token"] ?: return
-        val type = params["type"]
-        val expiresAtMs = System.currentTimeMillis() +
-            (params["expires_in"]?.toLongOrNull() ?: 3600L) * 1000
+    private fun adoptAuthLink(link: AuthLink.Tokens) {
+        val access = link.accessToken
+        val refresh = link.refreshToken
+        val type = link.type
+        val expiresAtMs = System.currentTimeMillis() + link.expiresInSeconds * 1000
 
         viewModelScope.launch {
             // Who this link belongs to is settled *before* anything is written. The previous
@@ -718,14 +726,6 @@ class WhaaackViewModel(app: Application) : AndroidViewModel(app) {
             }
         }
     }
-
-    /**
-     * Fragment values arrive percent-encoded — `error_description` in particular reads as
-     * gibberish without this. Safe for the tokens too: they are base64url, whose alphabet
-     * contains neither `%` nor `+`.
-     */
-    private fun decode(value: String): String =
-        runCatching { URLDecoder.decode(value, "UTF-8") }.getOrDefault(value)
 
     fun consumeToast() {
         _state.update { it.copy(toast = null) }
