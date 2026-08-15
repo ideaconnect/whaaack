@@ -132,7 +132,29 @@ class GameRenderer(density: Float) {
     private var boardInset = 0f
     private val cardRect = RectF()
     private val boardRect = RectF()
-    val endRunRect = RectF()
+    private val endRunRect = RectF()
+
+    /**
+     * The geometry the UI thread hit-tests against, published as one immutable snapshot.
+     *
+     * [onSurfaceChanged] runs on the render thread while touches arrive on the main thread,
+     * and the board fields above are plain floats with no happens-before edge between the
+     * two. Reading them directly from [tileAt] risked a touch racing a resize seeing half of
+     * the new layout and half of the old — or, in principle, never seeing the new layout at
+     * all. A copy published through a @Volatile reference hands the touch path a coherent
+     * set in one read.
+     */
+    private class TouchLayout(
+        @JvmField val boardRect: RectF,
+        @JvmField val endRunRect: RectF,
+        @JvmField val boardLeft: Float,
+        @JvmField val boardTop: Float,
+        @JvmField val tileSize: Float,
+        @JvmField val tileGap: Float,
+    )
+
+    @Volatile
+    private var touchLayout: TouchLayout? = null
 
     private var driftFar = 0f
     private var driftMid = 0f
@@ -212,6 +234,19 @@ class GameRenderer(density: Float) {
 
         scoreText.textSize = dp(46f)
         label.textSize = dp(11f)
+        // Sized here rather than at construction for the same reason `density` is re-read
+        // on every surface change: a display-size change reaches this renderer without
+        // recreating it, and a stroke width captured once would stay at the old density.
+        stroke.strokeWidth = dp(1f)
+
+        touchLayout = TouchLayout(
+            boardRect = RectF(boardRect),
+            endRunRect = RectF(endRunRect),
+            boardLeft = boardLeft,
+            boardTop = boardTop,
+            tileSize = tileSize,
+            tileGap = tileGap,
+        )
     }
 
     /**
@@ -223,13 +258,18 @@ class GameRenderer(density: Float) {
      * used to be dead, which at four fruit and a 200 ms cycle is a lot of stolen hits.
      */
     fun tileAt(x: Float, y: Float): Int {
-        if (tileSize <= 0f) return -1
-        if (!boardRect.contains(x, y)) return -1
-        val pitch = tileSize + tileGap
-        val col = ((x - boardLeft) / pitch).toInt().coerceIn(0, GameEngine.TILE_COLUMNS - 1)
-        val row = ((y - boardTop) / pitch).toInt().coerceIn(0, GameEngine.TILE_ROWS - 1)
+        val layout = touchLayout ?: return -1
+        if (layout.tileSize <= 0f) return -1
+        if (!layout.boardRect.contains(x, y)) return -1
+        val pitch = layout.tileSize + layout.tileGap
+        val col = ((x - layout.boardLeft) / pitch).toInt().coerceIn(0, GameEngine.TILE_COLUMNS - 1)
+        val row = ((y - layout.boardTop) / pitch).toInt().coerceIn(0, GameEngine.TILE_ROWS - 1)
         return row * GameEngine.TILE_COLUMNS + col
     }
+
+    /** End-run pill hit-test for the UI thread, reading the same published snapshot. */
+    fun hitsEndRun(x: Float, y: Float): Boolean =
+        touchLayout?.endRunRect?.contains(x, y) == true
 
     fun draw(canvas: Canvas, engine: GameEngine, assets: GameAssets, nowNs: Long) {
         val dtSec = if (lastFrameNs == 0L) 0f else (nowNs - lastFrameNs) / 1_000_000_000f

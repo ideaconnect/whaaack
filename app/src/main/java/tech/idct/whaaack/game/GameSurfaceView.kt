@@ -220,7 +220,7 @@ class GameSurfaceView @JvmOverloads constructor(
         val x = event.getX(pointer)
         val y = event.getY(pointer)
 
-        if (renderer.endRunRect.contains(x, y)) {
+        if (renderer.hitsEndRun(x, y)) {
             // Arming is worth a sound: it is the only feedback that the press registered but
             // did not do the thing, and silence there reads as an unresponsive button.
             if (quitRun() == GameEngine.QuitPress.ARMED) callbacks?.onQuitArmed()
@@ -343,14 +343,21 @@ class GameSurfaceView @JvmOverloads constructor(
             // Unbounded on purpose: the loop only ever waits on the buffer queue for about
             // a frame, and any timeout here would let the surface be destroyed while a
             // buffer is still dequeued.
+            var interrupted = false
             while (true) {
                 try {
                     join()
-                    return
+                    break
                 } catch (_: InterruptedException) {
-                    Thread.currentThread().interrupt()
+                    // The flag is not re-asserted until the join has completed: join()
+                    // throws immediately when entered with it already set, so restoring
+                    // it inside the loop would turn this blocking wait into a busy spin
+                    // that burns the calling thread until the render thread happens to
+                    // exit on its own.
+                    interrupted = true
                 }
             }
+            if (interrupted) Thread.currentThread().interrupt()
         }
 
         override fun run() {
@@ -408,6 +415,12 @@ class GameSurfaceView @JvmOverloads constructor(
                 // free-form and desktop windowing do not always honour that.)
                 if (!renderer.boardDrawable) {
                     engine.pause(System.nanoTime())
+                    // No frames are drawn while the window is unplayable, so the frame
+                    // delta must not accumulate: without this, the first frame after the
+                    // window grows back sees a dt equal to the whole pause and jumps the
+                    // parallax forward by that much — the same failure resetFrameClock
+                    // exists to stop on the surface-rebuild path.
+                    renderer.resetFrameClock()
                     try {
                         sleep(32)
                     } catch (_: InterruptedException) {
