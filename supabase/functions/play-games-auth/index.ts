@@ -144,7 +144,10 @@ Deno.serve(async (req: Request): Promise<Response> => {
   const player = await playerResponse.json();
   const playerId: unknown = player?.playerId;
   if (typeof playerId !== "string" || playerId.length === 0) {
-    return failed(502, "no_player_id", player);
+    // The field names, never the values. Google's players/me answer carries the gamer tag,
+    // avatar URLs and profile settings, and none of that belongs in a log we only keep to
+    // find out which key was missing.
+    return failed(502, "no_player_id", { received: Object.keys(player ?? {}) });
   }
   // The gamer tag is a suggestion, not an identity: handle_new_user() sanitises it into the
   // shape profiles accepts and de-duplicates it against the board, and falls back to a

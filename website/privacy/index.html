@@ -164,15 +164,25 @@
         </tr>
         <tr>
           <td>Purchase status of the ad-free unlock</td>
-          <td>To stop showing you ads.</td>
+          <td>To stop showing you ads, and to keep them off when Google Play cannot be reached.</td>
           <td>Art. 6(1)(b).</td>
-          <td>Held by Google Play; we store only a yes/no flag on your device.</td>
+          <td>The purchase itself is held by Google Play. On your device we keep only what the
+          ad gate needs: whether you own it, when that was last confirmed, and the Google Play
+          order number, which is there so we can look up a purchase if you ever ask us about
+          one. None of it is sent to us or used for anything else.</td>
         </tr>
       </tbody>
     </table>
     </div>
 
     <h3>What stays on your device and never reaches us</h3>
+    <p>None of the following is sent to our servers. One caveat first, because "on your device"
+    is not quite the whole story on Android: your settings file — which holds the four toggles
+    below and your best time — is included in <strong>Android's own cloud backup</strong> and in
+    device-to-device transfer, so a copy of it may sit in your Google account. That is Google's
+    backup of your phone, working as you have configured it, and restoring it on a new phone is
+    what carries your best time across. Your sign-in session is deliberately kept <em>out</em> of
+    both.</p>
     <ul>
       <li>Your sound, music, haptics and parallax settings.</li>
       <li>Your best time on this device, set by any run — ranked or casual. We never receive it:
@@ -245,8 +255,9 @@
       <li><strong>A record of each finished run</strong> — how long you survived (in milliseconds
       and in seconds), how much fruit you hit, how much escaped, the top speed you reached, and
       whether the run was ranked.</li>
-      <li><strong>Your best run so far</strong>, re-sent when the app starts and after a Play
-      Games sign-in, so a profile is not left showing less than you have actually done.</li>
+      <li><strong>Your best run so far</strong>, re-sent each time the app comes to the
+      foreground and after a Play Games sign-in, so a profile is not left showing less than you
+      have actually done — including runs you played before you were signed in.</li>
     </ul>
     <p>All of it is attached to your Play Games profile, not to any Whaaack! account, and it is
     the game's own numbers — nothing about your device, your location or your identity beyond
@@ -389,6 +400,13 @@
     a parent or guardian; casual play needs no account at all.</p>
     <p>The app is not listed in Google Play's Families programme and is not designed for
     children. If you believe a child has given us data, tell us and we will erase it.</p>
+    <p>One point specific to <a href="#playgames">Play Games</a>: casual play needs no Whaaack!
+    account, but it is not the same as playing anonymously. If the device is signed in to a Play
+    Games profile, that profile records the achievements and run statistics described above,
+    whoever is holding the phone. A Play Games profile for a child is set up and controlled
+    through Google's own family tools, not through this app — we neither create one nor can we
+    see whose it is. If a child should not be building one, sign that profile out on the device
+    and the app stops sending anything.</p>
 
     <h2 id="security">10. Security</h2>
     <p>Traffic between the app and our backend is encrypted in transit (HTTPS/TLS). Passwords are
