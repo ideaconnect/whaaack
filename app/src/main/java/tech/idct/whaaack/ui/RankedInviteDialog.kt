@@ -4,6 +4,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
@@ -18,6 +19,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
@@ -47,6 +49,8 @@ fun RankedInviteDialog(
     state: RankedInvite,
     onAccept: () -> Unit,
     onDecline: () -> Unit,
+    onTerms: () -> Unit,
+    onPrivacy: () -> Unit,
 ) {
     val working = state == RankedInvite.WORKING
     Dialog(
@@ -115,8 +119,37 @@ fun RankedInviteDialog(
                         fontSize = 11.sp,
                         textAlign = TextAlign.Center,
                     )
+                    // This dialog creates a real account from one tap, which makes it the
+                    // moment the terms are accepted and the privacy policy becomes relevant.
+                    // Everywhere else those live behind Settings → About; a player who reaches
+                    // an account this way might never have opened that screen, so both are put
+                    // within reach of the button that does it.
+                    Text(
+                        "By continuing you accept the terms and the privacy policy.",
+                        color = Color(0x73FFF3E6),
+                        fontSize = 11.sp,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.padding(top = 2.dp),
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(18.dp)) {
+                        LinkText("Terms", onTerms)
+                        LinkText("Privacy policy", onPrivacy)
+                    }
                 }
             }
         }
     }
+}
+
+/** An underlined text link, sized to sit under the dialog's buttons without competing. */
+@Composable
+private fun LinkText(label: String, onClick: () -> Unit) {
+    Text(
+        label,
+        color = Color(0xB3FFF3E6),
+        fontSize = 11.sp,
+        fontWeight = FontWeight.Bold,
+        textDecoration = TextDecoration.Underline,
+        modifier = Modifier.clickableOnce(true, onClick).padding(vertical = 4.dp),
+    )
 }

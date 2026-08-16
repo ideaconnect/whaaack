@@ -36,6 +36,7 @@ import androidx.credentials.GetCredentialRequest
 import androidx.credentials.exceptions.GetCredentialCancellationException
 import androidx.credentials.exceptions.GetCredentialException
 import androidx.credentials.exceptions.NoCredentialException
+import androidx.core.net.toUri
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
 import com.google.android.libraries.identity.googleid.GetGoogleIdOption
@@ -53,8 +54,10 @@ import tech.idct.whaaack.ui.GameScreen
 import tech.idct.whaaack.ui.HomeScreen
 import tech.idct.whaaack.ui.LeaderboardScreen
 import tech.idct.whaaack.ui.OrchardBackdrop
+import tech.idct.whaaack.ui.PRIVACY_URL
 import tech.idct.whaaack.ui.RankedInviteDialog
 import tech.idct.whaaack.ui.SettingsScreen
+import tech.idct.whaaack.ui.TERMS_URL
 import tech.idct.whaaack.ui.theme.Cream
 import tech.idct.whaaack.ui.theme.WhaaackTheme
 import java.security.MessageDigest
@@ -190,6 +193,14 @@ private fun WhaaackApp(vm: WhaaackViewModel, onGoogleSignIn: () -> Unit) {
     val context = LocalContext.current
     val activity = remember(context) { context as? android.app.Activity }
     val googleAvailable = remember { BuildConfig.GOOGLE_WEB_CLIENT_ID.isNotBlank() }
+
+    // Opening a browser can fail on a device with none configured; a dead link is a better
+    // outcome than a crash on the screen where an account is about to be created.
+    fun openUrl(url: String) {
+        runCatching {
+            context.startActivity(Intent(Intent.ACTION_VIEW, url.toUri()))
+        }
+    }
 
     // PredictiveBackHandler rather than BackHandler: with targetSdk 36 predictive back is on
     // and cannot meaningfully be opted out of, and a plain BackHandler simply swallows the
@@ -345,6 +356,10 @@ private fun WhaaackApp(vm: WhaaackViewModel, onGoogleSignIn: () -> Unit) {
                     state = invite,
                     onAccept = { vm.acceptRankedInvite(activity) },
                     onDecline = { vm.declineRankedInvite() },
+                    // The account is created from this dialog, so both documents are reachable
+                    // from it rather than only from Settings → About.
+                    onTerms = { openUrl(TERMS_URL) },
+                    onPrivacy = { openUrl(PRIVACY_URL) },
                 )
             }
 

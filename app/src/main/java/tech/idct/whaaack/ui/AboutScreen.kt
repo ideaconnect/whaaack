@@ -48,8 +48,10 @@ private val CREDITS = listOf(
     ),
 )
 
-private const val PRIVACY_URL = "https://idct.tech/whaaack/privacy"
-private const val TERMS_URL = "https://idct.tech/whaaack/terms"
+// Internal rather than private: the ranked invitation dialog links to the same two documents,
+// and a second copy of these strings is a second thing to forget when a URL moves.
+internal const val PRIVACY_URL = "https://idct.tech/whaaack/privacy"
+internal const val TERMS_URL = "https://idct.tech/whaaack/terms"
 
 @Composable
 fun AboutScreen(onBack: () -> Unit) {
