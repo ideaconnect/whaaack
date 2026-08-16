@@ -223,7 +223,7 @@ fun SettingsScreen(
 
                     ActionRow(
                         "Display name",
-                        "Changeable once every 30 days",
+                        "First change free, then once every 30 days",
                     ) { sheet = Sheet.NAME }
 
                     // Both federated kinds are held by their provider. Offering either row
@@ -306,7 +306,13 @@ fun SettingsScreen(
         when (sheet) {
             Sheet.NAME -> EditSheet(
                 title = "Change display name",
-                body = "This is the name on the leaderboard. You can change it once every 30 days.",
+                // The cooldown is stamped by the first rename, not at signup — the trigger only
+                // raises when display_name_changed_at is already set — so the first change is
+                // always free. Worth saying: a Play Games player arrives with a name derived
+                // from their gamer tag and would otherwise think they had to live with it for
+                // a month.
+                body = "This is the name on the leaderboard. Your first change is free; " +
+                    "after that it is once every 30 days.",
                 fieldLabel = "New display name",
                 initial = state.player?.displayName.orEmpty(),
                 cta = "Save name",
