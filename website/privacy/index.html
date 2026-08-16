@@ -143,6 +143,13 @@
           <td>Held by Google on your Play Games profile, under their retention rules.</td>
         </tr>
         <tr>
+          <td>Which sign-in method the account uses (email, Google or Play Games)</td>
+          <td>To show the right controls — an account held by a provider has no password or
+          address for us to offer to change — and to know how to authenticate you.</td>
+          <td>Art. 6(1)(b).</td>
+          <td>Until you delete the account.</td>
+        </tr>
+        <tr>
           <td>Advertising ID and ad-related device signals</td>
           <td>To show ads, and — only if you agree — to personalise them and measure them.</td>
           <td>Art. 6(1)(a) — your consent, collected through Google's consent form wherever that
@@ -194,7 +201,9 @@
       phone.</li>
       <li>Your sign-in session, so you are not asked to log in every time: the access and
       refresh tokens, plus a local copy of your account id, email address, display name and
-      sign-in method, which is what lets the app greet you before the network answers. All of
+      sign-in method, which is what lets the app greet you before the network answers. For a
+      Play Games account the stored address is the derived one, so that copy contains your
+      player ID. All of
       it is deliberately excluded from Android cloud backup and from device-to-device
       transfer, so a restored backup cannot carry your session onto another phone.</li>
     </ul>
@@ -260,8 +269,10 @@
     <h3>What we send Google</h3>
     <p>When you are signed in to Play Games, and only then, the app reports:</p>
     <ul>
-      <li><strong>Achievement unlocks</strong> — the four survival milestones, awarded from your
-      best run on the device. Casual runs count; you do not need an account.</li>
+      <li><strong>Achievement unlocks</strong> — the four survival milestones. Awarded from the
+      run you have just finished, and also replayed from the best run stored on the device each
+      time the app comes to the foreground and after a Play Games sign-in, so that milestones
+      earned while signed out are not lost. Casual runs count; you do not need an account.</li>
       <li><strong>A record of every run that ends</strong> — how long you survived (in
       milliseconds and in seconds), how much fruit you hit, how much escaped, the top speed you
       reached, and whether the run was ranked. Including a run you back out of before it starts,
