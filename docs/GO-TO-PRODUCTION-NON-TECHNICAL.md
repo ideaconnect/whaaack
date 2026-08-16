@@ -286,6 +286,29 @@ section is a submission gate as well as a policy one.
   data is exempt. Answer "Users can request that data be deleted" = **Yes**. If you adopt a crash
   reporter or analytics ([technical plan](GO-TO-PRODUCTION-TECHNICAL.md) §1), this form changes — which is why that decision comes first.
 
+  **Play Games adds rows this list predates** (versionCode 4 onwards; derived the same way, from
+  the code). Two of them break the pattern above, so read the qualifiers rather than copying the
+  shape of the earlier entries:
+
+  - *App activity → Other actions*, **collected and shared**, recipient Google, purpose app
+    functionality — achievement unlocks and two Game Stats events per finished run
+    (`survived_ms`, `survived_seconds`, `fruit_hit`, `fruit_missed`, `top_speed`, `ranked`, plus
+    `currentProgress`). **Not optional**: it is on for any device with a Play Games profile,
+    starts at launch before any tap, fires for casual runs, and has no in-app switch — the only
+    off is signing out of Play Games. Everything else in this app is optional; this is not.
+  - *Personal info → User IDs*, collected — the Play Games **player ID**, stored in the account's
+    auth metadata and embedded in its derived address. Linked to identity.
+  - *Personal info → Name*, collected — the Play Games **gamer tag**, stored as supplied and used
+    to derive the **publicly visible** display name.
+
+  Both new *Personal info* rows apply only to players who create an account with Play Games, so
+  they are optional in the form's sense; the *App activity* row is not, and answering otherwise
+  would be the kind of mismatch Play rejects for. Keep "Users can request that data be deleted" =
+  **Yes**, and re-read the deletion page's Play Games route before ticking it — that route was
+  rewritten at the same time, because an account with no mailbox cannot be verified by email.
+  Note also for the form's "data is encrypted in transit" question that the Play Games traffic is
+  Google's own SDK talking to Google.
+
 - [ ] **Enter the account-deletion URL** 🔴
   The page already satisfies the policy's substance: live, reachable with no login and no install,
   describes both the in-app route and the without-the-app route, states what is deleted and that it
