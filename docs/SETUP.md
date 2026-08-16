@@ -47,7 +47,7 @@ RESEND_API_KEY=... supabase config push  # auth settings
 | --- | --- |
 | `profiles` | Public identity: display name (case-insensitively unique), provider |
 | `scores` | One row per completed ranked run; `millis` is the score |
-| `handle_new_user()` | Signup trigger — derives a display name and de-duplicates it |
+| `handle_new_user()` | Signup trigger — derives a display name and numbers it if taken |
 | `leaderboard(scope, limit)` | Ranked standings, one row per player (their best run) |
 | `my_standing(scope)` | The caller's own rank, which may sit below the visible page |
 | `delete_my_account()` | Lets a player erase themselves without a service key |
@@ -196,7 +196,11 @@ than it looks: in the native flow it is what appears on the account-picker sheet
 > in section 2 on why a secret-only push does nothing.
 
 On first Google sign-in the signup trigger seeds the display name from the Google account
-name, de-duplicating it if taken. The player can change it later in Settings.
+name. If that name is already on the board it gets the next free number — `Zenek`, then
+`Zenek2`, `Zenek3` — rather than failing the signup, because a blocked signup is unrecoverable
+and an odd name is not. The player can change it later in Settings, where a collision *is*
+refused: they asked for a specific name there, so they are told it is taken rather than handed
+a numbered one. Same trigger, same rule, for Play Games and for email signup.
 
 ---
 

@@ -27,6 +27,7 @@ import tech.idct.whaaack.data.BoardScope
 import tech.idct.whaaack.data.DataStoreSessionStore
 import tech.idct.whaaack.data.EntitlementStore
 import tech.idct.whaaack.data.GameSettings
+import tech.idct.whaaack.data.DisplayName
 import tech.idct.whaaack.data.LeaderboardRepository
 import tech.idct.whaaack.data.Player
 import tech.idct.whaaack.data.Preferences
@@ -138,6 +139,13 @@ data class UiState(
      */
     val playGamesAuthenticated: Boolean? = null,
     /**
+     * Whether this device has Play Games on it at all, which is a different question from
+     * [playGamesAuthenticated] and the one the provider button has to ask: being signed out of
+     * Play Games is recoverable with a press, having no Play Games is not. Null until the SDK
+     * has answered once. See `PlayGamesManager.onDevice`.
+     */
+    val playGamesOnDevice: Boolean? = null,
+    /**
      * Whether this build can turn a Play Games player into a Whaaack! account at all — that
      * is, whether a Game server client id was configured. Blank is a supported state, and it
      * means only that ranked play still requires signing up, exactly as it did before.
@@ -162,6 +170,19 @@ data class UiState(
 
     /** Whether Home should show the ranked pair of buttons rather than the signed-out pair. */
     val offersRanked: Boolean get() = signedIn || canMintPlayGamesAccount
+
+    /**
+     * Whether the auth screen lists Play Games beside email and Google.
+     *
+     * Deliberately *not* conditional on [playGamesAuthenticated]: it used to be, and that made
+     * the screen a dead end for anyone who dismissed v2's automatic prompt at launch — the
+     * provider they wanted simply was not there, and the way back was a Settings row nothing
+     * on the screen pointed at. The button now raises Play Games' own sign-in when it needs to,
+     * so the only things that can still make it impossible are a build with no Game server
+     * credential and a device with no Play Games to prompt with.
+     */
+    val offersPlayGamesSignIn: Boolean
+        get() = playGamesRankingAvailable && playGamesOnDevice == true
 }
 
 class WhaaackViewModel(app: Application) : AndroidViewModel(app) {
@@ -299,6 +320,12 @@ class WhaaackViewModel(app: Application) : AndroidViewModel(app) {
         }
 
         viewModelScope.launch {
+            playGames.onDevice.collect { onDevice ->
+                _state.update { it.copy(playGamesOnDevice = onDevice) }
+            }
+        }
+
+        viewModelScope.launch {
             val restored = auth.restore()
             // Both in one update: a frame that said "resolved" while `player` was still the
             // initial null is exactly the wrong-buttons flash this flag exists to prevent,
@@ -401,13 +428,28 @@ class WhaaackViewModel(app: Application) : AndroidViewModel(app) {
      * that says "Continue with Play Games" *is* the intent that dialog exists to collect —
      * and failures land in the error banner the other two providers already use rather than a
      * toast, because that is what this screen shows.
+     *
+     * Two hops, not one: Play Games itself first, and only then the account. The second hop
+     * used to be all there was, which meant the button could only be offered to a player Play
+     * Games had already authenticated — and so the player who dismissed the launch prompt by
+     * mistake found the provider missing from the one screen that is *about* choosing a
+     * provider. Both hops can be declined and neither leaves anything behind.
      */
     fun signInWithPlayGames(activity: Activity?) = viewModelScope.launch {
         // Both guards: this button's own re-tap, and the Home invitation dialog mid-mint.
         if (_state.value.busy || _state.value.rankedInvite != null) return@launch
         audio.blip()
         _state.update { it.copy(busy = true, authError = null) }
-        val error = adoptPlayGamesAccount(activity)
+        val error = if (activity == null || !ensurePlayGamesAuthenticated(activity)) {
+            // Deliberately not the sentence adoptPlayGamesAccount uses for a refused code:
+            // nothing is wrong with this player's account, they are simply not signed in to
+            // Play Games, and pressing the same button again is a real thing to try.
+            AuthError.Unexpected(
+                "Play Games sign-in didn't finish. Try again, or use email or Google.",
+            )
+        } else {
+            adoptPlayGamesAccount(activity)
+        }
         _state.update { it.copy(busy = false, authError = error) }
         if (error != null) return@launch
         _state.update { it.copy(actionSucceeded = it.actionSucceeded + 1) }
@@ -739,19 +781,35 @@ class WhaaackViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /**
-     * The player asked to sign in to Play Games. A cancelled prompt is reported: they pressed
-     * a button that visibly did nothing, and Play Games gives us no way to tell a dismissal
-     * from a genuine failure, so the wording covers both without accusing them of either.
+     * The player asked to sign in to Play Games from Settings, where it buys them achievements
+     * and nothing else — no Whaaack! account is created here. A cancelled prompt is reported:
+     * they pressed a button that visibly did nothing, and Play Games gives us no way to tell a
+     * dismissal from a genuine failure, so the wording covers both without accusing them of
+     * either.
      */
-    fun signInToPlayGames(activity: Activity) {
+    fun signInToPlayGames(activity: Activity) = viewModelScope.launch {
         audio.blip()
-        playGames.signIn(activity) { authenticated ->
-            if (authenticated) {
-                awardStoredBest(activity)
-            } else {
-                _state.update { it.copy(toast = "Play Games sign-in didn't finish.") }
-            }
+        if (!ensurePlayGamesAuthenticated(activity)) {
+            _state.update { it.copy(toast = "Play Games sign-in didn't finish.") }
         }
+    }
+
+    /**
+     * Gets Play Games to vouch for this player, raising its sign-in prompt if the SDK's
+     * automatic attempt at launch did not land — which for most players who need this means
+     * they dismissed that prompt, quite possibly by accident.
+     *
+     * Shared by the two buttons that can need it, so a sign-in reached from the auth screen
+     * earns exactly what one reached from Settings earns: [awardStoredBest] is the back-fill,
+     * and leaving it out of one door would mean a player's milestones depended on which button
+     * they happened to press. The early return saves a round trip rather than preventing a
+     * second prompt — `signIn()` on an authenticated player shows no UI either way.
+     */
+    private suspend fun ensurePlayGamesAuthenticated(activity: Activity): Boolean {
+        if (playGames.authenticated.value == true) return true
+        val authenticated = playGames.signIn(activity)
+        if (authenticated) awardStoredBest(activity)
+        return authenticated
     }
 
     /**
@@ -802,13 +860,26 @@ class WhaaackViewModel(app: Application) : AndroidViewModel(app) {
 
     fun signUp(email: String, password: String, displayName: String) = runAuth {
         auth.signUpWithEmail(email, password, displayName)
-        if (auth.player.value == null) {
+        val player = auth.player.value
+        if (player == null) {
             // Confirmation required: tell the player to check their inbox.
             _state.update { it.copy(
                 toast = "Check your inbox to confirm $email, then sign in.",
                 authMode = AuthMode.SIGN_IN,
             ) }
         } else {
+            // `handle_new_user` numbers a taken name rather than refusing it, which is right —
+            // a blocked signup is unrecoverable and an odd name is not — but it means the
+            // player can be given a name they never typed. Saying so is the difference between
+            // that and finding out from the leaderboard. Compared case-insensitively because
+            // display_name is citext, so a rename to differing case is the same name.
+            val asked = DisplayName.normalize(displayName)
+            if (!player.displayName.equals(asked, ignoreCase = true)) {
+                _state.update { it.copy(
+                    toast = "\"$asked\" was taken — you're ${player.displayName}. " +
+                        "You can change it in Settings.",
+                ) }
+            }
             navigate(Screen.HOME)
         }
     }

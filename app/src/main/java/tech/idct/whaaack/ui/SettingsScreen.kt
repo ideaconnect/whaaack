@@ -34,6 +34,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import tech.idct.whaaack.BuildConfig
 import tech.idct.whaaack.UiState
+import tech.idct.whaaack.data.DisplayName
 import tech.idct.whaaack.ui.theme.AccentInk
 import tech.idct.whaaack.ui.theme.Cream
 import tech.idct.whaaack.ui.theme.CreamDim
@@ -139,22 +140,26 @@ fun SettingsScreen(
 
                 // Nothing at all while the Play Games SDK is still resolving its automatic
                 // sign-in: the two rows below say opposite things, and showing the wrong one
-                // for a frame is how a settings screen ends up looking like it lied.
-                state.playGamesAuthenticated?.let { authenticated ->
-                    Spacer(Modifier.height(10.dp))
-                    SectionLabel("Play Games")
-                    if (authenticated) {
-                        ActionRow(
-                            "Achievements",
-                            "Your survival milestones",
-                            onClick = onAchievements,
-                        )
-                    } else {
-                        ActionRow(
-                            "Sign in to Play Games",
-                            "Track achievements on your Google account",
-                            onClick = onPlayGamesSignIn,
-                        )
+                // for a frame is how a settings screen ends up looking like it lied. And
+                // nothing ever on a device without Play Games on it, where the sign-in row
+                // would be a button that cannot succeed however often it is pressed.
+                if (state.playGamesOnDevice == true) {
+                    state.playGamesAuthenticated?.let { authenticated ->
+                        Spacer(Modifier.height(10.dp))
+                        SectionLabel("Play Games")
+                        if (authenticated) {
+                            ActionRow(
+                                "Achievements",
+                                "Your survival milestones",
+                                onClick = onAchievements,
+                            )
+                        } else {
+                            ActionRow(
+                                "Sign in to Play Games",
+                                "Track achievements on your Google account",
+                                onClick = onPlayGamesSignIn,
+                            )
+                        }
                     }
                 }
 
@@ -312,7 +317,7 @@ fun SettingsScreen(
                 // from their gamer tag and would otherwise think they had to live with it for
                 // a month.
                 body = "This is the name on the leaderboard. Your first change is free; " +
-                    "after that it is once every 30 days.",
+                    "after that it is once every 30 days. " + DisplayName.HINT + ".",
                 fieldLabel = "New display name",
                 initial = state.player?.displayName.orEmpty(),
                 cta = "Save name",

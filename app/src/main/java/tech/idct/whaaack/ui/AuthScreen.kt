@@ -35,6 +35,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import tech.idct.whaaack.AuthMode
 import tech.idct.whaaack.UiState
+import tech.idct.whaaack.data.DisplayName
 import tech.idct.whaaack.ui.theme.AccentInk
 import tech.idct.whaaack.ui.theme.AccentLight
 import tech.idct.whaaack.ui.theme.Cream
@@ -106,11 +107,12 @@ fun AuthScreen(
             )
         }
 
-        // Only for a player Play Games has already authenticated. Offering it to anyone else
-        // would be a button that opens nothing: there is no sign-in flow of ours behind it —
-        // the SDK signs people in by itself at launch, and all this can do is trade that for
-        // a Whaaack! account. The Settings screen is where a player goes to get Play Games
-        // itself signed in.
+        // Offered whether or not Play Games has signed this player in: the button raises that
+        // sign-in first when it has to, then trades the result for a Whaaack! account. It used
+        // to be shown only to an already-authenticated player, which turned a dismissed launch
+        // prompt — the SDK offers exactly one, and it lands over whatever the player was doing
+        // — into a missing provider on the one screen that is about picking a provider, with
+        // the way back buried in Settings and nothing here saying so.
         if (playGamesAvailable) {
             Spacer(Modifier.height(10.dp))
             PlayGamesSignInButton(
@@ -122,9 +124,12 @@ fun AuthScreen(
                 onClick = onPlayGames,
             )
             Spacer(Modifier.height(6.dp))
+            // One sentence for both states, because the button no longer knows which it is in
+            // until it is pressed — and copy that changed under the player as the SDK resolved
+            // would be the flicker the null check everywhere else exists to prevent.
             Text(
-                "Uses the Play Games profile you're already signed in to. Your Play Games " +
-                    "name will appear on the leaderboard.",
+                "Signs you in with your Play Games profile, asking you for it first if you're " +
+                    "not signed in. That name will appear on the leaderboard.",
                 color = Color(0x8AFFF3E6),
                 fontSize = 11.sp,
                 lineHeight = 15.sp,
@@ -157,6 +162,15 @@ fun AuthScreen(
                 value = displayName,
                 onValueChange = { displayName = it },
                 placeholder = "Shown on the leaderboard",
+            )
+            Spacer(Modifier.height(6.dp))
+            // The same rules the database holds, said before they can be broken rather than
+            // after — and worth the line here because a name that breaks them used to be
+            // quietly replaced at signup rather than refused.
+            Text(
+                DisplayName.HINT,
+                color = Color(0x8AFFF3E6),
+                fontSize = 11.sp,
             )
             Spacer(Modifier.height(14.dp))
         }

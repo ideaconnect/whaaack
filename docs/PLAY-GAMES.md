@@ -21,11 +21,19 @@ is the part most likely to waste an afternoon.
 | What a run earns | [`Achievement`](../app/src/main/java/tech/idct/whaaack/games/Achievement.kt), tested in `AchievementTest` |
 | Achievement ids | Committed defaults in `app/build.gradle.kts`, see [§5](#5-the-achievement-ids) |
 | Game Stats | [`GameStats`](../app/src/main/java/tech/idct/whaaack/games/GameStats.kt) + `assets/game-stats/`, see [§6](#6-game-stats) |
-| Player-facing entries | Settings → *Play Games*; Home → *Achievements* chip |
+| Player-facing entries | Settings → *Play Games*; Home → *Achievements* chip; auth screen → *Continue with Play Games* |
 
 v2 has no sign-in flow to drive: `initialize()` attempts one automatically at launch, so the
 app only ever *asks* whether that worked (`isAuthenticated()`, on every `onResume`) and offers
 a button that calls `signIn()` if it did not.
+
+That automatic attempt happens **once**, and it lands over whatever the player was doing. A
+player who dismisses it — by mistake, as often as not — gets no second offer from the SDK, so
+every button the app shows has to be able to raise `signIn()` itself. Both of them do:
+Settings' *Sign in to Play Games*, and the auth screen's *Continue with Play Games*, which
+signs into Play Games and mints the account in one press. They share
+`WhaaackViewModel.ensurePlayGamesAuthenticated`, so the achievement back-fill is identical
+whichever one the player found.
 
 **Signing into Play Games is not signing into Whaaack!** That distinction still holds: Play
 Games owns achievements, a Whaaack! account owns your leaderboard score, and `signIn()`
@@ -36,10 +44,10 @@ hold Play Games players and ours holds Whaaack! accounts, so a player with only 
 no way to be ranked at all. Since [§8](#8-accounts-minted-from-play-games) there are two ways
 in, both minting the same account:
 
-| Where | What raises it |
-| --- | --- |
-| Home → **Play ranked** | The invitation dialog, then the account is minted behind it |
-| Auth screen → **Continue with Play Games** | Nothing — the button press is the intent |
+| Where | What raises it | Shown to |
+| --- | --- | --- |
+| Home → **Play ranked** | The invitation dialog, then the account is minted behind it | A player Play Games has authenticated (`canMintPlayGamesAccount`) |
+| Auth screen → **Continue with Play Games** | Nothing — the button press is the intent | Anyone on a device with Play Games (`offersPlayGamesSignIn`) |
 
 So Play Games is a third way to sign in, beside email and Google, and all three can log in,
 log out, play ranked and put scores in Supabase. It is styled as its own provider rather than
@@ -410,7 +418,9 @@ constraint as everything else here — see §2.
 ```
 
 - Settings should show a **Play Games** section. Which row depends on whether the SDK's
-  automatic sign-in landed; neither row appears until it has answered, by design.
+  automatic sign-in landed; neither row appears until it has answered, and the whole section
+  stays away on a device where `isAuthenticated()` fails outright rather than answering false —
+  no Play Games there, so a sign-in row would be a button that can never work.
 - Play a run past 30 seconds. Play Games shows its own unlock toast; the app shows nothing,
   which is correct — the SDK owns that notification.
 - Home's **Achievements** chip appears once authenticated *and* signed in to a Whaaack!
@@ -437,20 +447,25 @@ already have.
 
 1. Home shows the ranked pair of buttons to a Play Games player with no account
    (`UiState.canMintPlayGamesAccount`), and the auth screen shows **Continue with Play Games**
-   to anyone Play Games has authenticated.
+   to anyone on a device that has Play Games at all (`UiState.offersPlayGamesSignIn`).
 2. Tapping **Play ranked** raises `RankedInviteDialog` rather than starting a run. This is the
    consent moment, and the reason accounts are not minted at Play Games sign-in: ranked play
    publishes a name, and that should follow from something the player did on purpose. The auth
    screen has no dialog — pressing a button that says "Continue with Play Games" *is* that
    intent, and it reports failures in the error banner the other two providers use.
-3. On accept, `PlayGamesManager.serverAuthCode` asks Play Games for a one-time server auth
+3. The auth screen's button has one extra hop in front of the rest, which Home's does not need:
+   `ensurePlayGamesAuthenticated` raises Play Games' own `signIn()` when the SDK's automatic
+   attempt did not land. That is the whole reason it can be offered to a player Play Games has
+   *not* authenticated, and it is where a second dismissal ends the flow — with the banner and
+   nothing created.
+4. On accept, `PlayGamesManager.serverAuthCode` asks Play Games for a one-time server auth
    code. Both entry points share `WhaaackViewModel.adoptPlayGamesAccount` from here down, so
    they cannot drift.
-4. `AuthRepository.signInWithPlayGames` POSTs it to the `play-games-auth` Edge Function.
-5. The function exchanges the code with Google — which needs the web client *secret*, which is
+5. `AuthRepository.signInWithPlayGames` POSTs it to the `play-games-auth` Edge Function.
+6. The function exchanges the code with Google — which needs the web client *secret*, which is
    why this cannot happen in the app — reads the player id back from `games/v1/players/me`,
    finds or creates the account, and returns an ordinary GoTrue token response.
-6. The run starts, ranked.
+7. The run starts, ranked.
 
 ### Why the exchange is server-side
 
@@ -469,8 +484,9 @@ else's name. The auth code is worthless without the secret, and the player id is
   writes its own `provider` when it creates the email identity and would otherwise leave the
   account looking like an email signup.
 - **Display name**: the gamer tag, run through the existing `handle_new_user()` trigger, which
-  sanitises it to the `profiles` constraints and de-duplicates it against the board. No new
-  SQL was needed; the trigger already did this for Google.
+  sanitises it to the `profiles` constraints and numbers it against the board if it is taken —
+  a second player whose tag is `Zenek` becomes `Zenek2`. No new SQL was needed; the trigger
+  already did this for Google.
 - **Deterministic**: the same player on a new device, or after a log out, resolves to the same
   account. Minting is idempotent.
 
@@ -506,7 +522,13 @@ See `docs/SETUP.md` §9 for the Game server credential and the two function secr
    player — same display name, same rank — because the account is keyed to the player id
    rather than created afresh. A second row on the board means the deterministic address is
    not resolving, which is the failure worth catching here.
-6. `supabase functions logs play-games-auth` names the failure on anything that goes wrong —
+6. Then the case that door was widened for: sign out of Play Games *and* Whaaack!, force-stop
+   the app, launch it, and dismiss the automatic Play Games prompt. **Continue with Play
+   Games** must still be on the auth screen, and pressing it must raise the Play Games prompt
+   and then land on Home signed in — one press, two hops. Dismissing that second prompt should
+   leave the error banner and nothing else. (Before this, the button was simply absent and
+   Settings was the only way back.)
+7. `supabase functions logs play-games-auth` names the failure on anything that goes wrong —
    `code_rejected` is almost always the wrong client id or a stale secret.
 
 Failures are always survivable: the player is left on Home with the ordinary sign-in still

@@ -31,9 +31,11 @@ import tech.idct.whaaack.game.GameEngine
  * account. What *does* is [serverAuthCode]: it turns an authenticated Play Games player into
  * proof our backend can check, and the account is minted from that. So "Continue with Play
  * Games" now appears on the auth screen beside Google, and the two really are alternatives
- * there. They are not interchangeable elsewhere, which is why the button is styled as its own
- * provider rather than as a second Google pill, and why Settings still offers Play Games
- * sign-in separately: that one is about achievements, and is reachable with no account at all.
+ * there: that button runs [signIn] first when Play Games has not signed the player in yet, so
+ * it is one press whichever state they arrived in. They are not interchangeable elsewhere,
+ * which is why the button is styled as its own provider rather than as a second Google pill,
+ * and why Settings still offers Play Games sign-in separately: that one stops at [signIn], and
+ * is about achievements, which need no account at all.
  *
  * None of the ids in that handshake are configured here, because none of them can be: PGS
  * identifies the app by package name plus signing certificate against the OAuth *Android*
@@ -68,6 +70,24 @@ class PlayGamesManager(
     val authenticated: StateFlow<Boolean?> = _authenticated.asStateFlow()
 
     /**
+     * Whether Play Games is reachable on this device at all. Null until [refresh] has tried
+     * once, then true once the SDK has answered the question and false while it never has.
+     *
+     * [authenticated] collapses "declined it" and "there is no Play Games here" into the same
+     * `false`, which is right for everything that unlocks or reports — both mean *do nothing* —
+     * and wrong for the controls that offer a way in. A player who dismissed the prompt needs a
+     * button that re-opens it; a player on a device without Play Games needs no button at all,
+     * because theirs could only ever fail. `isAuthenticated()` separates the two: it *succeeds*
+     * with false for the first and fails outright for the second.
+     *
+     * Sticky once true, because it is the negative reading that is unreliable: a bind to Play
+     * Services that has not come up yet fails exactly like a missing one, and a provider button
+     * that disappears for a moment mid-session would be a worse lie than the one this prevents.
+     */
+    private val _onDevice = MutableStateFlow<Boolean?>(null)
+    val onDevice: StateFlow<Boolean?> = _onDevice.asStateFlow()
+
+    /**
      * Milestones Play Games has confirmed for this process, so a re-award is cheap.
      *
      * Only ever added to on *success*. A failed unlock deliberately stays out, which is what
@@ -89,6 +109,9 @@ class PlayGamesManager(
         PlayGames.getGamesSignInClient(activity).isAuthenticated()
             .addOnCompleteListener { task ->
                 val ok = task.isSuccessful && task.result.isAuthenticated
+                // Only ever raised, never lowered: see [onDevice]. A task that answered at all
+                // proves Play Games is here, whatever the answer was.
+                if (_onDevice.value != true) _onDevice.value = task.isSuccessful
                 // A player who signed out of Play Games elsewhere must not keep the unlocks
                 // this process believes it delivered: clearing them means the next successful
                 // sign-in re-awards from the stored best rather than assuming it already did.
@@ -102,6 +125,9 @@ class PlayGamesManager(
      * Shows the Play Games sign-in prompt. Only ever called from a control the player pressed
      * — v2 already tried on its own at startup, and a second uninvited attempt would just be
      * a dialog in front of a game nobody asked to interrupt.
+     *
+     * Safe on a player who is already authenticated: the SDK completes it with no UI. So the
+     * callers that check first are saving a round trip, not preventing a second prompt.
      */
     fun signIn(activity: Activity, onResult: (Boolean) -> Unit) {
         PlayGames.getGamesSignInClient(activity).signIn()
@@ -110,6 +136,15 @@ class PlayGamesManager(
                 _authenticated.value = ok
                 onResult(ok)
             }
+    }
+
+    /**
+     * [signIn] for a caller that has to hold the player's place while the prompt is up and then
+     * go straight on to the next hop — the auth screen's "Continue with Play Games", which
+     * signs into Play Games and then trades that for a Whaaack! account in one press.
+     */
+    suspend fun signIn(activity: Activity): Boolean = suspendCancellableCoroutine { continuation ->
+        signIn(activity) { authenticated -> continuation.resume(authenticated) }
     }
 
     /**

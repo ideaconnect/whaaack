@@ -53,6 +53,29 @@ sealed class AuthError(val title: String, val body: String) {
         "Someone on the leaderboard already uses it.",
     )
 
+    /**
+     * The name breaks `display_name_length` or `display_name_shape`. Raised by [DisplayName]
+     * before the request goes out, because the same rejection arriving from Postgres is a
+     * 23514 carrying our constraint's name and nothing a player can act on — and the mapping
+     * below has no branch for it, so it reached the rename sheet verbatim.
+     */
+    class NameInvalid(body: String) : AuthError("Check that display name", body)
+
+    /**
+     * A rename that addressed no row: the account has no `profiles` row to change.
+     *
+     * The same shape of bug as [SessionExpired] and worth naming for the same reason. PostgREST
+     * answers a PATCH matching nothing with 200 and an empty array, not an error, so the call
+     * returned cleanly, the ViewModel counted it a success and toasted "Display name updated"
+     * over a leaderboard that still shows the old name — every time, for ever. The copy does
+     * not promise a fix, because there isn't one the player can perform; it only stops the app
+     * claiming the change happened.
+     */
+    data object ProfileMissing : AuthError(
+        "Couldn't save that name",
+        "We couldn't find your player profile, so nothing was changed. Try again in a moment.",
+    )
+
     data object WeakPassword : AuthError(
         "Password too weak",
         "Use at least 8 characters and one number.",
@@ -175,13 +198,20 @@ class AuthRepository(private val client: SupabaseClient) {
     suspend fun signUpWithEmail(email: String, password: String, displayName: String) {
         require(client.isConfigured) { "Supabase is not configured" }
         validate(email, password)
+        // Checked here rather than left to the trigger, which sanitises instead of refusing:
+        // a name of nothing but non-ASCII sails through signup and lands as "Player", and a
+        // player who typed one deserves to be told before the account exists rather than to
+        // discover it on the leaderboard. Uniqueness is still the trigger's to resolve.
+        DisplayName.validate(displayName)?.let { throw AuthResultException(it) }
 
         val payload = buildJsonObject {
             put("email", JsonPrimitive(email.trim()))
             put("password", JsonPrimitive(password))
             put(
                 "data",
-                buildJsonObject { put("display_name", JsonPrimitive(displayName.trim())) },
+                buildJsonObject {
+                    put("display_name", JsonPrimitive(DisplayName.normalize(displayName)))
+                },
             )
         }
         val raw = call { client.request("POST", "/auth/v1/signup", payload) }
@@ -297,10 +327,23 @@ class AuthRepository(private val client: SupabaseClient) {
         _player.value = null
     }
 
+    /**
+     * Renames the player, or explains why not.
+     *
+     * Unlike signup, this never picks a different name than the one asked for. A player typing
+     * into the rename sheet has a specific name in mind, and handing them "Zenek2" because
+     * "Zenek" was gone would be answering a question they did not ask — so a collision comes
+     * back as [AuthError.NameTaken] and they choose again. The automatic numbering belongs to
+     * `handle_new_user`, where nobody is at the keyboard to be asked.
+     */
     suspend fun updateDisplayName(newName: String) {
         val session = requireSession()
-        val payload = buildJsonObject { put("display_name", JsonPrimitive(newName.trim())) }
-        call {
+        // Before the request, not after: the database's own rejection of a malformed name is a
+        // 23514 naming a check constraint, which is not something to show anybody.
+        DisplayName.validate(newName)?.let { throw AuthResultException(it) }
+        val name = DisplayName.normalize(newName)
+        val payload = buildJsonObject { put("display_name", JsonPrimitive(name)) }
+        val raw = call {
             client.request(
                 "PATCH",
                 "/rest/v1/profiles?id=eq.${session.userId}",
@@ -309,10 +352,31 @@ class AuthRepository(private val client: SupabaseClient) {
                 extraHeaders = mapOf("Prefer" to "return=representation"),
             )
         }
-        _player.value = _player.value?.copy(displayName = newName.trim())
+
+        // `return=representation` was already being asked for and the answer already being
+        // thrown away, which is what let this fail in silence: PostgREST reports a PATCH that
+        // matched no rows as 200 with `[]`, not as an error, so an account with no profiles
+        // row — the old signup trigger's last resort could leave one, and so can any account
+        // predating the trigger — took the rename, said "Display name updated", and kept the
+        // name it had. Reading the row back is the whole check.
+        //
+        // Only a body that parses as an *empty array* is that failure. A body that does not
+        // parse as an array at all is a different and much weaker claim — a 204 from a
+        // PostgREST that ignored the Prefer header, a proxy rewriting the response — and
+        // reading it as "nothing was changed" would invent the opposite lie: a rename that
+        // worked, reported as a failure, with the player renaming again over a name already
+        // taken by themselves.
+        val rows = runCatching { client.json.parseToJsonElement(raw).jsonArray }.getOrNull()
+        if (rows != null && rows.isEmpty()) throw AuthResultException(AuthError.ProfileMissing)
+
+        // The stored name rather than the requested one. They are the same today — nothing
+        // server-side rewrites a rename — but the row that came back is the fact, and the
+        // cache below is what the next cold start believes before the network answers.
+        val stored = rows?.firstOrNull()?.jsonObject?.str("display_name") ?: name
+        _player.value = _player.value?.copy(displayName = stored)
         // Keep the launch-time cache in step, or the next start shows the old name until
         // the profile request lands.
-        client.cacheDisplayName(newName.trim())
+        client.cacheDisplayName(stored)
     }
 
     suspend fun updateEmail(newEmail: String) {

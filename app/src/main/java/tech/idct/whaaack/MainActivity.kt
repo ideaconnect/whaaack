@@ -276,11 +276,11 @@ private fun WhaaackApp(vm: WhaaackViewModel, onGoogleSignIn: () -> Unit) {
                     onSignIn = { email, pass -> vm.signIn(email, pass) },
                     onSignUp = { email, pass, name -> vm.signUp(email, pass, name) },
                     onGoogle = onGoogleSignIn,
-                    // Both halves: a build with no Game server credential has nothing to
-                    // exchange a code with, and a player Play Games has not authenticated has
-                    // no code to give.
-                    playGamesAvailable = state.playGamesRankingAvailable &&
-                        state.playGamesAuthenticated == true,
+                    // Being signed out of Play Games is no longer one of the things that hides
+                    // this — the button raises that sign-in itself. What is left is the pair
+                    // that no press can fix: a build with no Game server credential to exchange
+                    // a code with, and a device with no Play Games to prompt with.
+                    playGamesAvailable = state.offersPlayGamesSignIn,
                     onPlayGames = { vm.signInWithPlayGames(activity) },
                     onForgot = { vm.go(Screen.FORGOT) },
                     onSkip = { vm.startGame(ranked = false) },
