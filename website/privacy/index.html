@@ -47,14 +47,21 @@
   <div class="wrap prose">
     <span class="eyebrow">Legal</span>
     <h1 style="font-size:clamp(2rem,5vw,3rem)">Privacy Policy</h1>
-    <p class="updated">Last updated: 14 August 2026 · Applies to the Whaaack! Android app and to this website.</p>
+    <p class="updated">Last updated: 16 August 2026 · Applies to the Whaaack! Android app and to this website.<br>
+    <em>What changed on 16 August 2026:</em> Google Play Games was added to the app — achievements,
+    run statistics, and the option to create an account from your Play Games identity. That is
+    <a href="#playgames">section 4</a>, and it also changed what
+    <a href="#what">section 2</a> and <a href="#deletion">section 7</a> have to say.</p>
 
     <div class="callout">
       <p><strong>The short version.</strong> You can play Whaaack! without an account, without
-      giving us anything, and offline. If you want to appear on the leaderboard you give us an
-      email address, a display name and your scores — and you can erase all of it from inside
-      the app at any time, permanently. Ads are shown by Google AdMob unless you buy the
-      ad-free unlock, and you are asked for consent before any personalised ad loads.</p>
+      giving us anything, and offline. If you want to appear on the leaderboard you give us a
+      display name and your scores, plus either an email address or your Google Play Games
+      identity — and you can erase all of it from inside the app at any time, permanently. Ads
+      are shown by Google AdMob unless you buy the ad-free unlock, and you are asked for consent
+      before any personalised ad loads. Separately, if your phone is signed in to Google Play
+      Games, the app reports your runs and achievements to Google — see
+      <a href="#playgames">section 4</a> for what that involves and how to stop it.</p>
     </div>
 
     <h2 id="controller">1. Who is responsible (administrator danych)</h2>
@@ -105,6 +112,36 @@
           <td>Until you delete the account.</td>
         </tr>
         <tr>
+          <td>Your <strong>Google Play Games player ID</strong> and gamer tag, if you create your
+          account with Play Games</td>
+          <td>The player ID is what the account <em>is</em>: it is how signing in again on any
+          device finds the same account, and we hold no password or usable address for it. The
+          gamer tag becomes your starting display name on the leaderboard.</td>
+          <td>Art. 6(1)(b) — without it there is no account to perform anything against.</td>
+          <td>Until you delete the account.</td>
+        </tr>
+        <tr>
+          <td>A derived address of the form
+          <code>pgs-&lt;player&nbsp;ID&gt;@pgs.whaaack.invalid</code>, for Play Games accounts</td>
+          <td>Our sign-in system requires every account to carry an address, so one is generated
+          from the player ID. It is an internal label, not a mailbox: <code>.invalid</code> is a
+          reserved domain that can never receive mail, so nothing is ever sent there and no
+          password reset can be attempted against it.</td>
+          <td>Art. 6(1)(b).</td>
+          <td>Until you delete the account.</td>
+        </tr>
+        <tr>
+          <td>Run statistics and achievement unlocks sent to Google Play Games — time survived,
+          fruit hit, fruit missed, top speed, whether the run was ranked, and your best run</td>
+          <td>To show your achievements and Game Stats on your Play Games profile. Sent whenever
+          your phone is signed in to Play Games, for casual runs as well as ranked ones, and
+          whether or not you have a Whaaack! account.</td>
+          <td>Art. 6(1)(f) — our legitimate interest in providing the achievements and profile
+          stats the app offers. You can stop it entirely by signing out of Play Games; see
+          <a href="#playgames">section 4</a>.</td>
+          <td>Held by Google on your Play Games profile, under their retention rules.</td>
+        </tr>
+        <tr>
           <td>Advertising ID and ad-related device signals</td>
           <td>To show ads, and — only if you agree — to personalise them and measure them.</td>
           <td>Art. 6(1)(a) — your consent, collected through Google's consent form wherever that
@@ -138,9 +175,12 @@
     <h3>What stays on your device and never reaches us</h3>
     <ul>
       <li>Your sound, music, haptics and parallax settings.</li>
-      <li>Your best time on this device, set by any run — ranked or casual. Casual play is
-      entirely offline and is never sent anywhere; a ranked run separately posts its score to
-      the leaderboard.</li>
+      <li>Your best time on this device, set by any run — ranked or casual. We never receive it:
+      a ranked run posts its own score to the leaderboard separately, and that posted score is
+      what we hold. Note that this is about <em>us</em> — if you are signed in to Google Play
+      Games, your runs are also reported to Google, casual ones included. That is described in
+      <a href="#playgames">section 4</a>, and it is the one thing on this list that leaves the
+      phone.</li>
       <li>Your sign-in session, so you are not asked to log in every time: the access and
       refresh tokens, plus a local copy of your account id, email address, display name and
       sign-in method, which is what lets the app greet you before the network answers. All of
@@ -183,7 +223,62 @@
     <code>ACCESS_ADSERVICES_TOPICS</code>) to the app automatically. How Google uses that data
     is described in <a href="https://policies.google.com/technologies/partner-sites" rel="noopener">Google's own policy</a>.</p>
 
-    <h2 id="recipients">4. Who else sees your data</h2>
+    <h2 id="playgames">4. Google Play Games</h2>
+    <p>Whaaack! uses <strong>Google Play Games Services</strong> for achievements and for the
+    run statistics shown on your Play Games profile. This is worth reading even if you have no
+    Whaaack! account, because it is the one part of the app that sends anything anywhere without
+    one.</p>
+
+    <h3>It starts by itself</h3>
+    <p>Play Games version 2 has no sign-in button for an app to offer. The app initialises the
+    Play Games SDK when it starts, and the SDK signs you in automatically against whichever Play
+    Games profile your device already has — <strong>before you have touched anything in the app,
+    and independently of the advertising consent form</strong>, which governs advertising only.
+    If your device has no Play Games profile, or you have signed out of it, nothing here happens
+    at all and the rest of the game is unaffected.</p>
+
+    <h3>What we send Google</h3>
+    <p>When you are signed in to Play Games, and only then, the app reports:</p>
+    <ul>
+      <li><strong>Achievement unlocks</strong> — the four survival milestones, awarded from your
+      best run on the device. Casual runs count; you do not need an account.</li>
+      <li><strong>A record of each finished run</strong> — how long you survived (in milliseconds
+      and in seconds), how much fruit you hit, how much escaped, the top speed you reached, and
+      whether the run was ranked.</li>
+      <li><strong>Your best run so far</strong>, re-sent when the app starts and after a Play
+      Games sign-in, so a profile is not left showing less than you have actually done.</li>
+    </ul>
+    <p>All of it is attached to your Play Games profile, not to any Whaaack! account, and it is
+    the game's own numbers — nothing about your device, your location or your identity beyond
+    the Play Games profile you are already signed in to.</p>
+
+    <h3>Who controls it</h3>
+    <p>Google is an <strong>independent controller</strong> for your Play Games profile and for
+    everything on it. Their handling is governed by the
+    <a href="https://policies.google.com/privacy" rel="noopener">Google Privacy Policy</a> and
+    the Play Games Services terms, not by this one. We can send achievements and statistics to
+    that profile; we cannot read your friends, your other games, or anything else on it.</p>
+
+    <h3>How to stop it</h3>
+    <p>Sign out of Play Games — in the Play Games app, or in your device's Google settings. The
+    app then stops sending anything, every achievement call becomes a no-op, and the game plays
+    exactly as before. There is nothing to configure in Whaaack! itself, because there is nothing
+    of yours here to switch off. You may also object to this processing under Art. 21 GDPR
+    through the <a href="/whaaack/contact/">contact form</a>; to remove what Google already
+    holds, ask Google, since it is their record.</p>
+
+    <h3>If you use Play Games to create a Whaaack! account</h3>
+    <p>Signing in to Play Games does <em>not</em> create an account by itself. If you choose
+    <em>Continue with Play Games</em>, or accept the offer when you first tap <em>Play ranked</em>,
+    the app asks Google to confirm who you are and we then create a Whaaack! account from that
+    answer. What we receive and keep is your Play Games <strong>player ID</strong> and your
+    <strong>gamer tag</strong>, which becomes your starting display name on the public
+    leaderboard — so the name other players see is the one your Play Games profile carries, until
+    you change it in <em>Settings</em>. We receive no email address in this flow, and there is no
+    password. Deleting the account removes all of it from our side; see
+    <a href="#deletion">section 7</a>.</p>
+
+    <h2 id="recipients">5. Who else sees your data</h2>
     <ul>
       <li><strong>Supabase</strong> — our backend (database and authentication). A processor
       acting on our instructions under a data processing agreement.</li>
@@ -192,6 +287,10 @@
       <li><strong>Google (Sign-In)</strong> — if you choose Google Sign-In, Google is a separate
       controller for the sign-in event itself. We receive only the email and name from the
       token.</li>
+      <li><strong>Google (Play Games Services)</strong> — achievements and run statistics, as an
+      independent controller for your Play Games profile. If you create your account with Play
+      Games, Google also confirms your player ID and gamer tag to us during that sign-in. Fully
+      described in <a href="#playgames">section 4</a>.</li>
       <li><strong>Google Play</strong> — distribution and payments. For purchases in the EEA,
       Google is the seller of record. When you buy the ad-free unlock while signed in, the app
       sends Google a one-way scrambled form of your account id with the order — Google asks for
@@ -214,19 +313,20 @@
     </ul>
     <p>We do not sell your data, and we do not use it for advertising profiles of our own.</p>
 
-    <h2 id="transfers">5. Transfers outside the EEA</h2>
+    <h2 id="transfers">6. Transfers outside the EEA</h2>
     <p>Some of the providers above are established in, or use infrastructure in, the United
     States. Where data leaves the European Economic Area it is protected by the European
     Commission's <strong>Standard Contractual Clauses</strong>, and in some cases additionally by
     the provider's certification under the EU–US Data Privacy Framework. You can ask us for a
     copy of the safeguards relied on via the <a href="/whaaack/contact/">contact form</a>.</p>
 
-    <h2 id="deletion">6. Deleting your account — the important bit</h2>
+    <h2 id="deletion">7. Deleting your account — the important bit</h2>
     <p>Whaaack! has a real delete button, and it really deletes.</p>
     <p>In the app: <strong>Settings → Delete my account</strong>, then type DELETE to confirm.
     That single action:</p>
     <ul>
-      <li>deletes your authentication user, so the email address is gone;</li>
+      <li>deletes your authentication user, so the email address is gone — or, for a Play Games
+      account, the player ID and the derived address we held against it;</li>
       <li>deletes your profile row, so the display name is gone and freed for someone else;</li>
       <li>deletes every score you have ever recorded, so you disappear from the leaderboards;</li>
       <li>clears the best score and the sign-in session held on the device, so the account is
@@ -237,12 +337,24 @@
     <p>It is immediate and irreversible. There is no deactivated state, no grace period and no
     way for us to undo it. Encrypted backups may retain traces for a short period before
     rotating out; nothing in them is used for any purpose.</p>
+    <div class="callout">
+      <p><strong>Your Play Games profile is not ours to delete.</strong> Achievements and run
+      statistics live on your Google Play Games profile, and Google is their controller — so
+      deleting a Whaaack! account removes our records but leaves those untouched, exactly as it
+      leaves an ad-free purchase untouched. To clear them, use Google's own controls: the Play
+      Games app can delete a game's Play Games data, and Google's account tools cover the rest.
+      Deleting a Whaaack! account created <em>from</em> Play Games also does not sign you out of
+      Play Games; if you later sign in again the same way, a fresh account is created, because
+      the player ID is the only thing that identified the old one and we no longer hold it.</p>
+    </div>
     <p>If you cannot get into the app — you lost the device, or you already uninstalled it —
-    use the <a href="/whaaack/delete-account/">out-of-app deletion page</a>.</p>
+    use the <a href="/whaaack/delete-account/">out-of-app deletion page</a>. It covers Play
+    Games accounts too, which have no email address we could write to; the page explains what we
+    ask for instead.</p>
     <p>Deleting your account does not cancel the ad-free purchase: that belongs to your Google
     Play account, not to your Whaaack! account, and it will still be there if you come back.</p>
 
-    <h2 id="rights">7. Your rights</h2>
+    <h2 id="rights">8. Your rights</h2>
     <p>Under the GDPR you have the right to:</p>
     <ul>
       <li><strong>access</strong> your data and get a copy of it (Art. 15);</li>
@@ -270,7 +382,7 @@
     <p class="updated">Note: the UODO moved from ul. Stawki 2 in July 2025. The address above is
     the current one.</p>
 
-    <h2 id="children">8. Children</h2>
+    <h2 id="children">9. Children</h2>
     <p>Whaaack! is not directed at children. In Poland the age at which a child can consent to
     an information society service on their own is <strong>16</strong> — Poland did not lower the
     GDPR default. If you are under 16, please do not create an account without the agreement of
@@ -278,7 +390,7 @@
     <p>The app is not listed in Google Play's Families programme and is not designed for
     children. If you believe a child has given us data, tell us and we will erase it.</p>
 
-    <h2 id="security">9. Security</h2>
+    <h2 id="security">10. Security</h2>
     <p>Traffic between the app and our backend is encrypted in transit (HTTPS/TLS). Passwords are
     hashed by our authentication provider and are never visible to us. Sign-in tokens are stored
     in the app's private storage and are deliberately excluded from Android cloud backup and
@@ -286,12 +398,12 @@
     Access to leaderboard data is restricted by row-level security so no client can read another
     player's raw records.</p>
 
-    <h2 id="automated">10. Automated decision-making</h2>
+    <h2 id="automated">11. Automated decision-making</h2>
     <p>None. We do not profile you and there is no automated decision-making producing legal or
     similarly significant effects on you within the meaning of Art. 22 GDPR. Ranking is an
     ordinary sort by score.</p>
 
-    <h2 id="changes">11. Changes to this policy</h2>
+    <h2 id="changes">12. Changes to this policy</h2>
     <p>If this policy changes materially we will update the date at the top and, where the change
     matters to you, say so in the app. The current version always lives at this URL.</p>
   </div>
