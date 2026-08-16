@@ -145,19 +145,21 @@
           <!--
             Two real captures from one run, floated over each other: the board mid-game in
             front, the score it ended on behind. Both come off a device via
-            tools/capture_gameplay.py — not mockups and not renders.
+            tools/capture_store_screenshots.py — not mockups and not renders. Re-running it
+            rewrites these six stills, and the numbers in the alt text below are read off
+            them, so they are re-read at the same time.
           -->
           <div class="hero-box" data-tilt>
             <span class="glow" aria-hidden="true"></span>
             <figure class="win win-back">
               <img src="assets/img/shots/real-score.webp" width="540" height="1205"
                    decoding="async"
-                   alt="The end of a run: three escaped, 5,848 milliseconds survived, four hits.">
+                   alt="The end of a run: three escaped, 47,718 milliseconds survived, 186 hits.">
             </figure>
             <figure class="win win-front">
               <img src="assets/img/shots/real-run.webp" width="540" height="1205"
                    fetchpriority="high" decoding="async"
-                   alt="A run in progress at 4,763 milliseconds: a kiwi up, a splat where the last fruit was hit, one strike taken.">
+                   alt="A run in progress at 30,899 milliseconds and speed eight: splats across the board where fruit were hit, and a peach still up.">
             </figure>
           </div>
           <p class="stage-note">Real screens, captured on a device.</p>
@@ -244,15 +246,17 @@
           <figcaption>Three… two… one</figcaption>
         </figure>
         <figure style="--i:1">
-          <div class="phone"><img src="assets/img/shots/real-hit.webp" width="540" height="1205" loading="lazy" decoding="async" alt="1,117 milliseconds in: an apple and a banana up, and a splat where the last one was hit."></div>
-          <figcaption>First blood</figcaption>
+          <div class="phone"><img src="assets/img/shots/real-hit.webp" width="540" height="1205" loading="lazy" decoding="async" alt="616 milliseconds in at speed one: a pineapple and an apple up, and nothing hit yet."></div>
+          <figcaption>First fruit</figcaption>
         </figure>
+        <!-- Burst before strike: the fan reads left to right as one run, and the strike is
+             the end of it. -->
         <figure style="--i:2">
-          <div class="phone"><img src="assets/img/shots/real-strike.webp" width="540" height="1205" loading="lazy" decoding="async" alt="The screen flashing red on a strike, two of three taken, at 2,013 milliseconds."></div>
-          <figcaption>Strike two</figcaption>
+          <div class="phone"><img src="assets/img/shots/real-burst.webp" width="540" height="1205" loading="lazy" decoding="async" alt="Speed twelve at 44,287 milliseconds: splats over most of the board, 175 hits taken."></div>
+          <figcaption>Top speed</figcaption>
         </figure>
         <figure style="--i:3">
-          <div class="phone"><img src="assets/img/shots/real-burst.webp" width="540" height="1205" loading="lazy" decoding="async" alt="The end-of-run burst: every fruit thrown up the screen at once, 5,848 milliseconds survived."></div>
+          <div class="phone"><img src="assets/img/shots/real-strike.webp" width="540" height="1205" loading="lazy" decoding="async" alt="The run ending at 47,718 milliseconds: all three strikes taken, six fruit up at once."></div>
           <figcaption>And out</figcaption>
         </figure>
       </div>
