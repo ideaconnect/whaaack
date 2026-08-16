@@ -88,6 +88,22 @@ android {
             "\"${secret("GOOGLE_WEB_CLIENT_ID")}\"",
         )
 
+        // The web OAuth client registered as a Play Games "Game server" credential, which
+        // `requestServerSideAccess` names when asking for a code the play-games-auth function
+        // can exchange. Deliberately its own key rather than reusing GOOGLE_WEB_CLIENT_ID:
+        // the two *may* be the same client, but only one of them is the credential the Play
+        // Games configuration knows about, and silently substituting the other would fail at
+        // the token endpoint with an error no part of the app could explain.
+        //
+        // Blank is a supported state and the default. It means only that ranked play still
+        // requires a Whaaack! account, exactly as it did before — the same way a blank
+        // achievement id is skipped rather than sent.
+        buildConfigField(
+            "String",
+            "PGS_SERVER_CLIENT_ID",
+            "\"${secret("PGS_SERVER_CLIENT_ID")}\"",
+        )
+
         // The one-time "remove ads" product — "Whaaack the ads!" — as it exists in the Play
         // Console: a one-time product `no.ads.forever` with a single active, *backwards
         // compatible* purchase option (`no-ads-forever-buy`). Backwards compatible is the

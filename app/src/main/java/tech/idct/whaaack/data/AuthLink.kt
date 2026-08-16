@@ -29,6 +29,16 @@ sealed interface AuthLink {
     /** The link cannot be used. [message] is written to be shown to the player as it is. */
     data class Failed(val message: String) : AuthLink
 
+    /**
+     * The link worked and there is nothing to adopt — only something to say. GoTrue sends
+     * this shape mid-way through a double-confirm email change: the first link answers with
+     * no tokens and no error, just a `message` telling the player the other inbox still
+     * holds the second half. Dropping it into [Ignored] recreated exactly the dead-link
+     * silence [Failed] was built to end — the player tapped a link, watched the app come to
+     * the front, and was shown nothing.
+     */
+    data class Notice(val message: String) : AuthLink
+
     /** Nothing addressed to auth in it at all. Not a failure; there is simply nothing to do. */
     data object Ignored : AuthLink
 }
@@ -66,6 +76,23 @@ internal fun parseAuthFragment(fragment: String?): AuthLink {
             // An hour is GoTrue's own default, and the client refreshes ahead of expiry anyway.
             expiresInSeconds = params["expires_in"]?.toLongOrNull() ?: 3600L,
             type = params["type"]?.takeIf { it.isNotBlank() },
+        )
+    }
+
+    // Before the error branch: a message link carries no error params, and no tokens either.
+    params["message"]?.takeIf { it.isNotBlank() }?.let { message ->
+        // GoTrue's own wording for the double-confirm halfway point is stiff ("Confirmation
+        // link accepted. Please proceed to confirm link sent to the other email") — say the
+        // same thing in the app's voice, and pass anything unrecognised through verbatim,
+        // the same trust Failed extends to error_description.
+        val halfway = message.contains("proceed to confirm", ignoreCase = true)
+        return AuthLink.Notice(
+            if (halfway) {
+                "One down, one to go — open the link in your other inbox to finish " +
+                    "changing your email."
+            } else {
+                message
+            },
         )
     }
 

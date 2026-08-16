@@ -5,6 +5,8 @@ import android.util.Log
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlin.coroutines.resume
 import com.google.android.gms.games.PlayGames
 import com.google.android.gms.games.playergameevent.PlayerGameEvent
 import tech.idct.whaaack.BuildConfig
@@ -22,11 +24,16 @@ import tech.idct.whaaack.game.GameEngine
  * Play Games account the device already has, and by the time anything asks, it has usually
  * answered. So the app's job is not to authenticate anybody; it is to *ask* whether that
  * already happened ([refresh]) and, only if it did not, to offer a button that calls
- * [signIn]. That is the shape Google's guidance requires, and the reason there is no Play
- * Games button on the auth screen next to the Google one: they would look like alternatives
- * and they are not. The Google button signs you into a Whaaack! *account*, which owns the
- * leaderboard score. This signs you into Play Games, which owns achievements. Neither is a
- * prerequisite for the other, and a player can have either, both or neither.
+ * [signIn]. That is the shape Google's guidance requires.
+ *
+ * Which is still a different act from signing into a Whaaack! *account*, the thing that owns
+ * a leaderboard score — a player can have either, both or neither, and [signIn] creates no
+ * account. What *does* is [serverAuthCode]: it turns an authenticated Play Games player into
+ * proof our backend can check, and the account is minted from that. So "Continue with Play
+ * Games" now appears on the auth screen beside Google, and the two really are alternatives
+ * there. They are not interchangeable elsewhere, which is why the button is styled as its own
+ * provider rather than as a second Google pill, and why Settings still offers Play Games
+ * sign-in separately: that one is about achievements, and is reachable with no account at all.
  *
  * None of the ids in that handshake are configured here, because none of them can be: PGS
  * identifies the app by package name plus signing certificate against the OAuth *Android*
@@ -103,6 +110,45 @@ class PlayGamesManager(
                 _authenticated.value = ok
                 onResult(ok)
             }
+    }
+
+    /**
+     * Asks Play Games for a one-time code our backend can exchange for proof of who this
+     * player is.
+     *
+     * The code is useless to anybody without the web client's secret, which is why it is safe
+     * to hand it to the app at all — and why the app can never shortcut this by simply
+     * claiming a player id. [serverClientId] must be the **web** OAuth client registered as a
+     * Game server credential in the Play Games Services configuration, not the Android one.
+     *
+     * `forceRefreshToken` is false: the backend uses the resulting access token once, inside
+     * the same request, to ask who the player is. Nothing here acts on their behalf later, so
+     * asking Google to mint a refresh token would be requesting offline access we would then
+     * have to store and protect for no purpose.
+     *
+     * Returns null when Play Games is not authenticated, when no server client is configured,
+     * or when Play Games declines — all of which are the caller's cue to leave the player
+     * exactly where they were.
+     */
+    suspend fun serverAuthCode(activity: Activity, serverClientId: String): String? {
+        if (_authenticated.value != true) return null
+        if (serverClientId.isBlank()) return null
+        return suspendCancellableCoroutine { continuation ->
+            PlayGames.getGamesSignInClient(activity)
+                .requestServerSideAccess(serverClientId, false)
+                .addOnCompleteListener { task ->
+                    // `task.result` *throws* on a failed Task rather than returning null, so
+                    // the success check has to happen before it is read, not inside a takeIf
+                    // alongside it — that ordering turns every declined sign-in into a crash
+                    // on the main thread.
+                    if (!task.isSuccessful) {
+                        Log.w(TAG, "No server auth code", task.exception)
+                        continuation.resume(null)
+                        return@addOnCompleteListener
+                    }
+                    continuation.resume(task.result?.takeIf { it.isNotBlank() })
+                }
+        }
     }
 
     /**

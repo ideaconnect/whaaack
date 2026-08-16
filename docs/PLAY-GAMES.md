@@ -27,10 +27,23 @@ v2 has no sign-in flow to drive: `initialize()` attempts one automatically at la
 app only ever *asks* whether that worked (`isAuthenticated()`, on every `onResume`) and offers
 a button that calls `signIn()` if it did not.
 
-**This is not the same thing as the Google button on the auth screen.** That one signs you
-into a Whaaack! account, which owns your leaderboard score. Play Games owns achievements.
-Neither implies the other, and a player can have either, both or neither — which is why they
-live on different screens and never appear as alternatives to each other.
+**Signing into Play Games is not signing into Whaaack!** That distinction still holds: Play
+Games owns achievements, a Whaaack! account owns your leaderboard score, and `signIn()`
+creates no account.
+
+What changed is that the first can now *produce* the second. A Play Games leaderboard can only
+hold Play Games players and ours holds Whaaack! accounts, so a player with only the former had
+no way to be ranked at all. Since [§8](#8-accounts-minted-from-play-games) there are two ways
+in, both minting the same account:
+
+| Where | What raises it |
+| --- | --- |
+| Home → **Play ranked** | The invitation dialog, then the account is minted behind it |
+| Auth screen → **Continue with Play Games** | Nothing — the button press is the intent |
+
+So Play Games is a third way to sign in, beside email and Google, and all three can log in,
+log out, play ranked and put scores in Supabase. It is styled as its own provider rather than
+as a second Google pill, because the two are only interchangeable on that one screen.
 
 Runs are recorded to the device's personal best whether or not anything is signed in, and
 `syncPlayGames` replays that best on every resume. So a player who has been playing signed
@@ -390,3 +403,94 @@ constraint as everything else here — see §2.
   without replaying it — the stored personal best is replayed on every resume and on sign-in.
 
 If nothing authenticates at all, it is §2 — not this section.
+
+---
+
+## 8. Accounts minted from Play Games
+
+A Play Games leaderboard can only ever hold Play Games players, and ours holds Whaaack!
+accounts — there is no API, client or server, that writes a Play Games score for an arbitrary
+player id, and no way to put a Whaaack!-only player on a Play Games board. So the two
+populations cannot be merged from the leaderboard end. They are merged from the *account*
+end instead: a Play Games player is given a Whaaack! account made out of the identity they
+already have.
+
+### What happens, in order
+
+1. Home shows the ranked pair of buttons to a Play Games player with no account
+   (`UiState.canMintPlayGamesAccount`), and the auth screen shows **Continue with Play Games**
+   to anyone Play Games has authenticated.
+2. Tapping **Play ranked** raises `RankedInviteDialog` rather than starting a run. This is the
+   consent moment, and the reason accounts are not minted at Play Games sign-in: ranked play
+   publishes a name, and that should follow from something the player did on purpose. The auth
+   screen has no dialog — pressing a button that says "Continue with Play Games" *is* that
+   intent, and it reports failures in the error banner the other two providers use.
+3. On accept, `PlayGamesManager.serverAuthCode` asks Play Games for a one-time server auth
+   code. Both entry points share `WhaaackViewModel.adoptPlayGamesAccount` from here down, so
+   they cannot drift.
+4. `AuthRepository.signInWithPlayGames` POSTs it to the `play-games-auth` Edge Function.
+5. The function exchanges the code with Google — which needs the web client *secret*, which is
+   why this cannot happen in the app — reads the player id back from `games/v1/players/me`,
+   finds or creates the account, and returns an ordinary GoTrue token response.
+6. The run starts, ranked.
+
+### Why the exchange is server-side
+
+The app cannot be trusted to say who it is. The anon key ships inside the APK, so if the
+client simply posted a player id, anybody could claim any id and own the board under someone
+else's name. The auth code is worthless without the secret, and the player id is read out of
+*Google's* answer rather than out of the request body. That is the whole security argument.
+
+### What the account looks like
+
+- **Address**: `pgs-<playerId>@pgs.whaaack.invalid` — a derived identifier, not a mailbox.
+  `.invalid` is reserved by RFC 2606 and can never resolve, so nothing can be sent there and
+  no password reset can be attempted. Settings therefore shows "Play Games account" rather
+  than the address, and hides the Email and Password rows (`Player.hasPassword`).
+- **Provider**: `play_games`, stamped onto `app_metadata` *after* creation, because GoTrue
+  writes its own `provider` when it creates the email identity and would otherwise leave the
+  account looking like an email signup.
+- **Display name**: the gamer tag, run through the existing `handle_new_user()` trigger, which
+  sanitises it to the `profiles` constraints and de-duplicates it against the board. No new
+  SQL was needed; the trigger already did this for Google.
+- **Deterministic**: the same player on a new device, or after a log out, resolves to the same
+  account. Minting is idempotent.
+
+### What it deliberately does not do
+
+- **No back-fill.** `prefs.localBestMillis` is not posted on creation. It has no `hits` or
+  `top_speed` behind it, so a back-fill would have to invent both to satisfy
+  `scores_hits_plausible` and `scores_top_speed_plausible` — fabricating data specifically to
+  pass our own fraud checks. A new account starts at "No ranked run yet" and their next run
+  counts, which is seconds away now that there is no sign-up in between.
+- **No linking.** A player with an email account *and* Play Games can end up with two
+  identities and two rows on the board. Nothing merges them today. The minted account carries
+  `pgs_player_id` in `app_metadata` precisely so a linking flow could be written later.
+
+### Configuration
+
+Blank is a supported state: with no `PGS_SERVER_CLIENT_ID`, `playGamesRankingAvailable` is
+false, Home shows the signed-out pair, and ranked play needs a sign-up exactly as before. The
+same reasoning as a blank achievement id — a fresh clone still builds and plays.
+
+See `docs/SETUP.md` §9 for the Game server credential and the two function secrets.
+
+### Testing it
+
+1. Sign out of the Whaaack! account, stay signed in to Play Games.
+2. Home should show **Play ranked** / **Play for fun**.
+3. Tap Play ranked → the invitation appears → accept → the button reads "Setting up…" and a
+   ranked run starts.
+4. Settings should read "Play Games account" with no Email or Password row, and the
+   leaderboard footer should read **No ranked run yet** until the run finishes.
+5. Now the other door, which is the one a returning player uses: log out, tap **Sign in**, and
+   press **Continue with Play Games**. It should land back on Home signed in as the *same*
+   player — same display name, same rank — because the account is keyed to the player id
+   rather than created afresh. A second row on the board means the deterministic address is
+   not resolving, which is the failure worth catching here.
+6. `supabase functions logs play-games-auth` names the failure on anything that goes wrong —
+   `code_rejected` is almost always the wrong client id or a stale secret.
+
+Failures are always survivable: the player is left on Home with the ordinary sign-in still
+available, and nothing half-created is left behind, because the account is created by one
+backend request or not at all.

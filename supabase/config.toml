@@ -88,3 +88,20 @@ secret = "env(GOOGLE_CLIENT_SECRET)"
 # The app hashes a nonce into the Google request and sends the raw value to Supabase
 # alongside the token, so leave verification on.
 skip_nonce_check = false
+
+# ------------------------------------------------------------------------------- functions
+
+# Turns a Play Games server auth code into a session, so a player who has Play Games and no
+# Whaaack! account can still be ranked. See supabase/functions/play-games-auth/index.ts, and
+# docs/SETUP.md for the two secrets it needs.
+#
+# verify_jwt must be OFF for this project. The gateway check parses the Authorization bearer
+# as a JWT, and this project runs on the new-format sb_publishable_ key — which is not one —
+# so with the check on, every call 401s as "Invalid JWT" before the function runs, and
+# nothing ever appears in its logs. (The first draft here reasoned from the legacy anon key,
+# which *was* a JWT and did satisfy the check.) The function performs the same
+# keep-off-the-open-internet gate itself, by comparing the `apikey` header against
+# SUPABASE_ANON_KEY — the real security boundary is the Google code exchange either way.
+# Applied at `supabase functions deploy`, not `config push`.
+[functions.play-games-auth]
+verify_jwt = false

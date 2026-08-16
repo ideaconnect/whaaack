@@ -17,6 +17,10 @@ SUPABASE_ANON_KEY=sb_publishable_...
 
 # Only needed once Google sign-in is configured (section 3).
 GOOGLE_WEB_CLIENT_ID=
+
+# Only needed for accounts minted from Play Games (section 9). Blank is supported and
+# simply leaves ranked play behind a sign-up, exactly as before.
+PGS_SERVER_CLIENT_ID=
 ```
 
 `SUPABASE_ANON_KEY` is a *publishable* key. It is meant to ship inside the APK — row level
@@ -349,7 +353,68 @@ sign-in recorded as working in section 3, since it is the same client.
 
 ---
 
-## 8. Before release
+## 9. Accounts minted from Play Games
+
+Lets a player who has Play Games and no Whaaack! account be ranked, by making them one out of
+the identity they already hold. Design and testing notes live in
+[PLAY-GAMES.md §8](PLAY-GAMES.md#8-accounts-minted-from-play-games); this is the wiring.
+
+Nothing here is required to ship. With `PGS_SERVER_CLIENT_ID` blank the feature is inert and
+ranked play needs a sign-up, as it did before.
+
+### Step 1 — a Game server credential
+
+Play Console → Play Games Services → Setup and management → Configuration → **Add credential**
+→ type **Game server**. Point it at a **web** OAuth client (create one in Google Cloud project
+`whaaack-505409` if there is none: APIs & Services → Credentials → Create → OAuth client ID →
+Application type **Web application**).
+
+This is a *different kind* of credential from the Android ones in section 7. The Android
+client identifies the app by package name and SHA-1 and has no secret; this one has a secret,
+and the secret is the entire reason the exchange can be trusted.
+
+⚠️ It may be the same web client as `GOOGLE_WEB_CLIENT_ID`, but it does not have to be, and
+only the one registered here as a Game server credential will work. They are kept as separate
+keys for exactly that reason — substituting one for the other fails at Google's token endpoint
+with an error the app cannot explain.
+
+### Step 2 — the app's half
+
+```properties
+# local.properties
+PGS_SERVER_CLIENT_ID=<the web client id from step 1>
+```
+
+### Step 3 — the function's half
+
+```bash
+supabase secrets set PGS_WEB_CLIENT_ID=<the same web client id>
+supabase secrets set PGS_WEB_CLIENT_SECRET=<its client secret>
+supabase functions deploy play-games-auth
+```
+
+`SUPABASE_URL`, `SUPABASE_ANON_KEY` and `SUPABASE_SERVICE_ROLE_KEY` are injected by the
+platform — do not set them yourself. `PGS_PLAYER_EMAIL_DOMAIN` is optional and defaults to
+`pgs.whaaack.invalid`; `.invalid` is reserved by RFC 2606 and can never resolve, which is what
+guarantees these derived addresses are identifiers rather than mailboxes.
+
+The client secret exists in exactly one place — Supabase's secret store. It must never reach
+`local.properties`, because everything there is compiled into the APK.
+
+### Step 4 — check it
+
+```bash
+supabase functions logs play-games-auth
+```
+
+Sign out of the Whaaack! account with Play Games still signed in, tap **Play ranked**, accept
+the invitation. A ranked run should start with no sign-up screen. `code_rejected` in the log
+is almost always the wrong client id or a stale secret; `not_configured` means the two secrets
+above were never set.
+
+---
+
+## 10. Before release
 
 - [ ] Fix SMTP (section 2) — signup is broken without it
 - [x] Google **Android** OAuth client (section 3)
@@ -363,6 +428,8 @@ sign-in recorded as working in section 3, since it is the same client.
 - [x] Create the four achievements; their ids are committed (section 7)
 - [ ] Upload `PlayerGameEvent.csv` and `GameStats.zip` for Game Stats (section 7)
 - [ ] Add Play Games testers, then **publish** the PGS configuration (section 7)
+- [ ] Game server credential + `PGS_SERVER_CLIENT_ID` + the two function secrets, then
+      `supabase functions deploy play-games-auth` (section 9) — optional; blank is inert
 - [ ] Clear `REMOVE_ADS_PLACEHOLDER_PRICE` from `local.properties` before believing a
       pre-release build's upsell (section 5) — it is debug-only, but it is also a lie
 - [ ] Publish the privacy policy at `https://idct.tech/whaaack/privacy` (linked from About)

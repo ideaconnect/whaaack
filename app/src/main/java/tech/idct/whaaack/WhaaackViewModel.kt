@@ -43,6 +43,18 @@ enum class Screen { HOME, AUTH, FORGOT, GAME, GAME_OVER, LEADERBOARD, SETTINGS, 
 
 enum class AuthMode { SIGN_IN, SIGN_UP }
 
+/**
+ * The one-off conversation with a Play Games player who has no Whaaack! account and has just
+ * asked to play ranked.
+ *
+ * [ASKING] is the consent moment and the reason accounts are minted here rather than at Play
+ * Games sign-in: ranked play puts a name on a public leaderboard, and that should follow from
+ * something the player did on purpose. [WORKING] covers the round trip that follows, which
+ * crosses two networks — Play Games for the auth code, then our own backend — and is long
+ * enough that an unlabelled pause reads as a dead button.
+ */
+enum class RankedInvite { ASKING, WORKING }
+
 data class RunSummary(
     val millis: Long,
     val hits: Int,
@@ -78,6 +90,21 @@ data class UiState(
     val boardLoading: Boolean = false,
     val boardError: String? = null,
     val standing: Standing? = null,
+    /**
+     * Which board window [standing] is an answer *for*, or null when there is no answer at
+     * all: nobody has asked yet, the ask failed, or the account changed under it.
+     *
+     * The two are read together, because `standing == null` on its own means nothing. The
+     * server correctly returns no row for an account that has never posted a ranked run, and
+     * reading that silence as "not loaded yet" is what let both screens fall back to
+     * [Preferences.localBestMillis] — the *device's* casual best, which survives a log-out by
+     * design — and print it as the account's ranked score. A player signing in on a phone
+     * somebody had already played was shown 46 seconds they had never played, next to a rank
+     * of "—". With the scope beside it the three cases are distinguishable: an answer for the
+     * window on screen, an answer for a different window, and no answer. Only the first is
+     * ever shown as a score.
+     */
+    val standingScope: BoardScope? = null,
     val lastRun: RunSummary? = null,
     val resetEmailSent: String? = null,
     val toast: String? = null,
@@ -110,11 +137,31 @@ data class UiState(
      * would be a row that flashes up and then contradicts itself.
      */
     val playGamesAuthenticated: Boolean? = null,
+    /**
+     * Whether this build can turn a Play Games player into a Whaaack! account at all — that
+     * is, whether a Game server client id was configured. Blank is a supported state, and it
+     * means only that ranked play still requires signing up, exactly as it did before.
+     */
+    val playGamesRankingAvailable: Boolean = false,
+    /** Non-null while the mint-an-account conversation is on screen. */
+    val rankedInvite: RankedInvite? = null,
 ) {
     /** The upsell is only offered once we know they have not already bought it. */
     val canBuyRemoveAds: Boolean get() = adsRemoved == false && removeAdsPrice != null
 
     val signedIn: Boolean get() = player != null
+
+    /**
+     * This player has a Play Games identity and no Whaaack! account, and we can turn the
+     * first into the second. They are offered ranked play like anybody else; the account is
+     * minted behind the first tap.
+     */
+    val canMintPlayGamesAccount: Boolean
+        get() = sessionResolved && !signedIn &&
+            playGamesAuthenticated == true && playGamesRankingAvailable
+
+    /** Whether Home should show the ranked pair of buttons rather than the signed-out pair. */
+    val offersRanked: Boolean get() = signedIn || canMintPlayGamesAccount
 }
 
 class WhaaackViewModel(app: Application) : AndroidViewModel(app) {
@@ -152,6 +199,11 @@ class WhaaackViewModel(app: Application) : AndroidViewModel(app) {
         private set
 
     init {
+        // Read once: a build either has the Game server credential or it does not, and
+        // nothing about that can change while the app is running.
+        _state.update {
+            it.copy(playGamesRankingAvailable = BuildConfig.PGS_SERVER_CLIENT_ID.isNotBlank())
+        }
         viewModelScope.launch {
             settings.flow.collect { prefs ->
                 _state.update { it.copy(prefs = prefs) }
@@ -160,8 +212,21 @@ class WhaaackViewModel(app: Application) : AndroidViewModel(app) {
             }
         }
         viewModelScope.launch {
+            // Tracked by id rather than by the Player itself, which is re-emitted whenever the
+            // profile is refreshed — a display-name change is not an account change and must
+            // not throw away a standing that is still correct.
+            var account: String? = null
             auth.player.collect { player ->
                 _state.update { it.copy(player = player) }
+                if (player?.userId == account) return@collect
+                account = player?.userId
+                // A standing belongs to an account, not to the device or to this process, and
+                // every way of changing accounts arrives here: the restore at launch, either
+                // sign-in, the sign-out, and the deep link that swaps one session for another.
+                // Clearing in one place is what stops the next player being shown the last
+                // one's rank while their own is still in flight.
+                _state.update { it.copy(standing = null, standingScope = null) }
+                if (player != null) refreshStanding()
             }
         }
         viewModelScope.launch {
@@ -277,8 +342,116 @@ class WhaaackViewModel(app: Application) : AndroidViewModel(app) {
 
     fun startGame(ranked: Boolean) {
         audio.blip()
+        // A Play Games player asking for their first ranked run. The account they need can be
+        // made from the identity they already have, but not silently: this is the moment
+        // their name starts appearing on a public board, so it is the moment to say so.
+        if (ranked && _state.value.canMintPlayGamesAccount) {
+            _state.update { it.copy(rankedInvite = RankedInvite.ASKING) }
+            return
+        }
         pendingRanked = ranked && _state.value.signedIn
         navigate(Screen.GAME)
+    }
+
+    /** The invitation was declined, or dismissed. Nothing was created and nothing changed. */
+    fun declineRankedInvite() {
+        _state.update { it.copy(rankedInvite = null) }
+    }
+
+    /**
+     * The player accepted: mint the account from their Play Games identity and start the run.
+     *
+     * Two hops, and both can fail in ways the player can do nothing about — Play Games can
+     * decline to issue a code, and the backend can be unreachable — so every failure lands on
+     * the same promise: they are left exactly where they were, on Home, with the ordinary
+     * sign-in still available. Nothing half-created survives, because the account is created
+     * by the backend in one request or not at all.
+     */
+    fun acceptRankedInvite(activity: Activity?) = viewModelScope.launch {
+        if (_state.value.rankedInvite != RankedInvite.ASKING) return@launch
+        // The auth screen's own Play Games button may already be mid-flight — its busy flag
+        // is that fact. Two concurrent adoptions would race two code exchanges and two
+        // session saves, with whichever lands last winning the store. Lowering the dialog
+        // rather than ignoring the tap: a button that silently does nothing reads as broken.
+        if (_state.value.busy) {
+            _state.update { it.copy(
+                rankedInvite = null,
+                toast = "Play Games sign-in is already in progress.",
+            ) }
+            return@launch
+        }
+        _state.update { it.copy(rankedInvite = RankedInvite.WORKING) }
+
+        val error = adoptPlayGamesAccount(activity)
+        _state.update { it.copy(rankedInvite = null, toast = error?.body ?: it.toast) }
+        if (error != null) return@launch
+
+        // Set directly rather than through `ranked && signedIn`: the player arrives in
+        // UiState on the auth collector's schedule, which has not necessarily run yet.
+        pendingRanked = true
+        navigate(Screen.GAME)
+    }
+
+    /**
+     * The same account, reached from the auth screen instead of from a ranked tap.
+     *
+     * Play Games is a way in beside email and Google, not a shortcut bolted onto one screen:
+     * a player who signs out has to be able to sign back in, and the only place they will look
+     * is the screen with the other two on it. No invitation dialog here — pressing a button
+     * that says "Continue with Play Games" *is* the intent that dialog exists to collect —
+     * and failures land in the error banner the other two providers already use rather than a
+     * toast, because that is what this screen shows.
+     */
+    fun signInWithPlayGames(activity: Activity?) = viewModelScope.launch {
+        // Both guards: this button's own re-tap, and the Home invitation dialog mid-mint.
+        if (_state.value.busy || _state.value.rankedInvite != null) return@launch
+        audio.blip()
+        _state.update { it.copy(busy = true, authError = null) }
+        val error = adoptPlayGamesAccount(activity)
+        _state.update { it.copy(busy = false, authError = error) }
+        if (error != null) return@launch
+        _state.update { it.copy(actionSucceeded = it.actionSucceeded + 1) }
+        // Only if the player is still where the flow started. busy does not freeze the whole
+        // screen — the back control and "Skip — just play for fun" stay live, deliberately —
+        // so a player who left during the round trip may be mid-run by the time this lands,
+        // and an unconditional navigate would yank them out of it. They are signed in either
+        // way; the navigation was only ever the courtesy, not the sign-in.
+        if (_state.value.screen == Screen.AUTH) navigate(Screen.HOME)
+    }
+
+    /**
+     * Trades this device's Play Games identity for a Whaaack! session, creating the account
+     * the first time and signing into the same one every time after — the address it is keyed
+     * to is derived from the player id, so this is idempotent and survives a log out.
+     *
+     * Returns null on success, or the error to show. Shared by both entry points so the two
+     * cannot drift: the failure modes here are Play Games declining to issue a code and the
+     * backend being unreachable, and neither leaves anything half-created behind, because the
+     * account is made by one backend request or not at all.
+     */
+    private suspend fun adoptPlayGamesAccount(activity: Activity?): AuthError? = try {
+        val code = activity?.let {
+            playGames.serverAuthCode(it, BuildConfig.PGS_SERVER_CLIENT_ID)
+        }
+        if (code == null) {
+            // Play Games would not vouch for them: signed out since the button appeared, or a
+            // build whose signing certificate the console does not know about.
+            AuthError.Unexpected(
+                "Play Games couldn't confirm your account. Try email or Google instead.",
+            )
+        } else {
+            auth.signInWithPlayGames(code)
+            null
+        }
+    } catch (e: AuthResultException) {
+        // AuthRepository.call funnels a dead connection into Offline, which is the one case
+        // with advice worth giving. The rest of the AuthError copy is about a form this player
+        // never filled in — passwords, taken emails, unconfirmed addresses — so anything else
+        // is reported as itself rather than mistranslated.
+        if (e.error == AuthError.Offline) e.error
+        else AuthError.Unexpected("Play Games sign-in couldn't be completed just now.")
+    } catch (e: Exception) {
+        AuthError.Unexpected("Play Games sign-in couldn't be completed just now.")
     }
 
     fun onRunFinished(result: GameEngine.Result, activity: Activity?) {
@@ -306,8 +479,19 @@ class WhaaackViewModel(app: Application) : AndroidViewModel(app) {
             if (result.ranked && _state.value.signedIn && result.millisSurvived > 0L) {
                 try {
                     if (leaderboard.submit(result.millisSurvived, result.hits, result.topSpeedLevel)) {
-                        rank = runCatching { leaderboard.myStanding(BoardScope.ALL_TIME)?.rank }
-                            .getOrNull()
+                        // One call, two answers: the rank this screen is about to announce,
+                        // and the standing Home and the leaderboard footer should now be
+                        // showing. Publishing it here is what stops a player's *first* ranked
+                        // run leaving them on the casual-best line until they think to open
+                        // the board.
+                        val standing = runCatching { leaderboard.myStanding(BoardScope.ALL_TIME) }
+                        rank = standing.getOrNull()?.rank
+                        if (standing.isSuccess) {
+                            _state.update { it.copy(
+                                standing = standing.getOrNull(),
+                                standingScope = BoardScope.ALL_TIME,
+                            ) }
+                        }
                     }
                 } catch (e: SupabaseClient.SupabaseException) {
                     // The server saw the score and said no — a plausibility constraint, the
@@ -639,10 +823,20 @@ class WhaaackViewModel(app: Application) : AndroidViewModel(app) {
         navigate(Screen.HOME)
     }
 
-    fun reportGoogleFailure(message: String?) {
+    /**
+     * A Google credential attempt failed for a reason worth reporting (cancellation and
+     * no-account are handled where they happen and never reach here).
+     *
+     * Fixed copy, deliberately. The exception messages Credential Manager produces are
+     * developer diagnostics — "failure response from one tap: 16: Cannot find a matching
+     * credential", "[28444] Developer console is not set up correctly" — and showing them
+     * verbatim was exactly the raw-server-text problem the [AuthError] catalogue exists to
+     * prevent. The detail still lands in logcat at the call site, where it is useful.
+     */
+    fun reportGoogleFailure() {
         _state.update { it.copy(
             authError = AuthError.Unexpected(
-                message ?: "Google sign-in was not completed.",
+                "Google sign-in didn't finish. Try again, or use email instead.",
             ),
         ) }
     }
@@ -657,8 +851,9 @@ class WhaaackViewModel(app: Application) : AndroidViewModel(app) {
         auth.signOut()
         // Keeps the device's casual best — this is a log out, not a delete — but the ranked
         // standing belongs to the account, and the leaderboard footer would otherwise read
-        // "Sign in to rank" next to the rank of whoever just left.
-        _state.update { it.copy(standing = null) }
+        // "Sign in to rank" next to the rank of whoever just left. The account watcher in
+        // `init` clears it too; this is the same guarantee made where it can be read.
+        _state.update { it.copy(standing = null, standingScope = null) }
         navigate(Screen.HOME)
     }
 
@@ -669,7 +864,13 @@ class WhaaackViewModel(app: Application) : AndroidViewModel(app) {
 
     fun changeEmail(newEmail: String) = runAuth {
         auth.updateEmail(newEmail)
-        _state.update { it.copy(toast = "Confirmation link sent to $newEmail") }
+        // double_confirm_changes is on: GoTrue mails BOTH addresses, and the change only
+        // lands once both links are opened. The old copy named only the new inbox, so a
+        // player who opened that one link waited on a change that was still holding for
+        // the other half.
+        _state.update { it.copy(
+            toast = "Links sent to $newEmail and your current address — open both to finish.",
+        ) }
     }
 
     fun changePassword(newPassword: String) = runAuth {
@@ -686,6 +887,7 @@ class WhaaackViewModel(app: Application) : AndroidViewModel(app) {
         settings.clearLocalBest()
         _state.update { it.copy(
             standing = null,
+            standingScope = null,
             board = emptyList(),
             lastRun = null,
             toast = "Account deleted",
@@ -724,15 +926,50 @@ class WhaaackViewModel(app: Application) : AndroidViewModel(app) {
             _state.update { it.copy(boardError = "Leaderboard is not configured yet.") }
             return@launch
         }
+        val asked = _state.value.player?.userId
         _state.update { it.copy(boardLoading = true, boardError = null) }
         val rows = runCatching { leaderboard.board(scope) }
-        val standing = runCatching { leaderboard.myStanding(scope) }.getOrNull()
-        _state.update { it.copy(
-            boardLoading = false,
-            board = rows.getOrDefault(emptyList()),
-            standing = standing,
-            boardError = rows.exceptionOrNull()?.let { "Couldn't reach the leaderboard." },
-        ) }
+        val standing = runCatching { leaderboard.myStanding(scope) }
+        _state.update { current ->
+            // The board is public, but the standing is not: an account change while this was
+            // in flight — a log-out from Home, say — would otherwise stamp the departing
+            // player's rank onto whoever is signed in now, or onto nobody at all.
+            val stillMine = current.player?.userId == asked
+            current.copy(
+                boardLoading = false,
+                board = rows.getOrDefault(emptyList()),
+                // Only a call that *returned* is an answer. A failed one leaves the pair
+                // empty, so the footer reads "—" rather than announcing that a player with a
+                // perfectly good rank has never posted a ranked run — and rather than keeping
+                // an answer that belongs to the window they just switched away from.
+                standing = if (stillMine) standing.getOrNull() else current.standing,
+                standingScope = when {
+                    !stillMine -> current.standingScope
+                    standing.isSuccess -> scope
+                    else -> null
+                },
+                boardError = rows.exceptionOrNull()?.let { "Couldn't reach the leaderboard." },
+            )
+        }
+    }
+
+    /**
+     * Fetches the player's own position without the board around it.
+     *
+     * The board is only loaded when the leaderboard screen is opened, but the Home card speaks
+     * for the same standing — so without this a signed-in player spent the whole session on
+     * the casual-best line unless they happened to visit the board. All-time because that is
+     * the window Home names, and the one the board itself opens on.
+     */
+    private fun refreshStanding(scope: BoardScope = BoardScope.ALL_TIME) = viewModelScope.launch {
+        if (!leaderboard.isConfigured) return@launch
+        val asked = _state.value.player?.userId ?: return@launch
+        val standing = runCatching { leaderboard.myStanding(scope) }
+        if (standing.isFailure) return@launch
+        _state.update { current ->
+            if (current.player?.userId != asked) current
+            else current.copy(standing = standing.getOrNull(), standingScope = scope)
+        }
     }
 
     /**
@@ -752,6 +989,9 @@ class WhaaackViewModel(app: Application) : AndroidViewModel(app) {
         when (val link = parseAuthFragment(fragment)) {
             is AuthLink.Ignored -> return
             is AuthLink.Failed -> _state.update { it.copy(toast = link.message) }
+            // The double-confirm halfway point: the link worked, nothing to adopt, and the
+            // player needs to hear that the other inbox holds the second half.
+            is AuthLink.Notice -> _state.update { it.copy(toast = link.message) }
             is AuthLink.Tokens -> adoptAuthLink(link)
         }
     }

@@ -304,16 +304,21 @@ fun ErrorBanner(title: String, body: String, modifier: Modifier = Modifier) {
 }
 
 @Composable
-fun CircleIconButton(symbol: String, onClick: () -> Unit) {
+fun CircleIconButton(symbol: String, onClick: () -> Unit, enabled: Boolean = true) {
     Box(
         Modifier
             .size(40.dp)
             .clip(RoundedCornerShape(14.dp))
             .background(Color(0x24FFF3E6))
-            .clickableOnce(true, onClick),
+            .clickableOnce(enabled, onClick),
         contentAlignment = Alignment.Center,
     ) {
-        Text(symbol, color = Cream, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+        Text(
+            symbol,
+            color = if (enabled) Cream else Color(0x66FFF3E6),
+            fontSize = 18.sp,
+            fontWeight = FontWeight.Bold,
+        )
     }
 }
 
@@ -430,6 +435,42 @@ fun GoogleSignInButton(label: String, enabled: Boolean = true, onClick: () -> Un
             Text(
                 label,
                 color = Color(0xFF1F1F1F),
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Medium,
+                modifier = Modifier.padding(start = 10.dp),
+            )
+        }
+    }
+}
+
+/**
+ * The third way in, beside email and Google.
+ *
+ * Deliberately *not* dressed as a Google button. It sits directly under one, and two
+ * near-identical white pills would invite the player to read them as the same thing — which
+ * is the mix-up this app has been careful about everywhere else: signing in to Play Games and
+ * signing in to a Whaaack! account used to be unrelated, and even now they are different
+ * handshakes against different OAuth clients. Same height and shape so the pair reads as one
+ * group; the app's own palette and a plain glyph so it reads as a *different* provider.
+ */
+@Composable
+fun PlayGamesSignInButton(label: String, enabled: Boolean = true, onClick: () -> Unit) {
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .height(44.dp)
+            .clip(RoundedCornerShape(4.dp))
+            .background(if (enabled) Color(0x38FFF3E6) else Color(0x1FFFF3E6))
+            .border(1.dp, if (enabled) Color(0x66FFF3E6) else Hairline, RoundedCornerShape(4.dp))
+            .clickableOnce(enabled, onClick)
+            .padding(horizontal = 12.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("🎮", fontSize = 16.sp)
+            Text(
+                label,
+                color = if (enabled) Cream else Color(0x8AFFF3E6),
                 fontSize = 14.sp,
                 fontWeight = FontWeight.Medium,
                 modifier = Modifier.padding(start = 10.dp),

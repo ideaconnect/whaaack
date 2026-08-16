@@ -3,6 +3,7 @@ package tech.idct.whaaack.data
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonArray
@@ -16,6 +17,20 @@ data class Player(
 ) {
     val initial: String get() = displayName.trim().firstOrNull()?.uppercase() ?: "?"
     val isGoogle: Boolean get() = provider.equals("google", ignoreCase = true)
+
+    /**
+     * Minted from a Play Games identity rather than signed up for. The address on such an
+     * account is a derived identifier at an unroutable domain, not a mailbox — so nothing may
+     * offer to mail it, and "your email" must never be shown as though it were one.
+     */
+    val isPlayGames: Boolean get() = provider.equals("play_games", ignoreCase = true)
+
+    /**
+     * Whether this account has a password at all. Both federated kinds are held by the
+     * provider, and offering "Change password" for one is a row that can only ever fail —
+     * which is exactly what Settings used to do, gated on Google alone.
+     */
+    val hasPassword: Boolean get() = !isGoogle && !isPlayGames
 }
 
 /**
@@ -41,6 +56,17 @@ sealed class AuthError(val title: String, val body: String) {
     data object WeakPassword : AuthError(
         "Password too weak",
         "Use at least 8 characters and one number.",
+    )
+
+    /**
+     * GoTrue's `same_password`: the "new" password is the current one. Its message — "New
+     * password should be different from the old password." — contains the substring the
+     * weak-password mapping matches on, so without a branch of its own it was reported as
+     * "Password too weak" to a player whose password met every rule.
+     */
+    data object SamePassword : AuthError(
+        "That's already your password",
+        "The new password must be different from your current one.",
     )
 
     data object BadEmail : AuthError(
@@ -163,8 +189,24 @@ class AuthRepository(private val client: SupabaseClient) {
         // With email confirmation on, signup returns a user but no session.
         val session = Session.fromTokenResponse(client.json, raw)
         if (session != null) {
-            client.saveSession(session)
-            loadProfile(session)
+            adoptSession(session)
+            return
+        }
+
+        // No session, so this is either "confirm your inbox" or GoTrue's enumeration
+        // shield. With confirmations on, signing up an address that already has a confirmed
+        // account does NOT return the 422 the EmailTaken mapping waits for — that would
+        // confirm the address exists to anyone who asks. It returns 200 with a fake,
+        // obfuscated user whose `identities` array is empty, and sends no mail. Reading that
+        // as "confirmation required" told the player to watch an inbox nothing was ever
+        // going to arrive in. The empty array is GoTrue's own documented tell, and we are
+        // allowed to use it where an attacker is not: this caller just proved they can send
+        // *us* the address either way.
+        val identities = runCatching {
+            (client.json.parseToJsonElement(raw) as? JsonObject)?.get("identities")?.jsonArray
+        }.getOrNull()
+        if (identities != null && identities.isEmpty()) {
+            throw AuthResultException(AuthError.EmailTaken)
         }
     }
 
@@ -177,8 +219,7 @@ class AuthRepository(private val client: SupabaseClient) {
         val raw = call { client.request("POST", "/auth/v1/token?grant_type=password", payload) }
         val session = Session.fromTokenResponse(client.json, raw)
             ?: throw AuthResultException(AuthError.Unexpected("No session returned."))
-        client.saveSession(session)
-        loadProfile(session)
+        adoptSession(session)
     }
 
     /**
@@ -195,8 +236,47 @@ class AuthRepository(private val client: SupabaseClient) {
         val raw = call { client.request("POST", "/auth/v1/token?grant_type=id_token", payload) }
         val session = Session.fromTokenResponse(client.json, raw)
             ?: throw AuthResultException(AuthError.Unexpected("No session returned."))
+        adoptSession(session)
+    }
+
+    /**
+     * Exchanges a Play Games server auth code for a session, creating the account the first
+     * time a player does this.
+     *
+     * The code goes to an Edge Function rather than to GoTrue, because Supabase has no grant
+     * for "a Play Games player": proving the code belongs to somebody needs the web client's
+     * secret, and the function is the only place that can hold one. What comes back is an
+     * ordinary GoTrue token response, so it is parsed by the same [Session.fromTokenResponse]
+     * as every other grant — see supabase/functions/play-games-auth.
+     */
+    suspend fun signInWithPlayGames(serverAuthCode: String) {
+        require(client.isConfigured) { "Supabase is not configured" }
+        val payload = buildJsonObject { put("code", JsonPrimitive(serverAuthCode)) }
+        val raw = call { client.request("POST", "/functions/v1/play-games-auth", payload) }
+        val session = Session.fromTokenResponse(client.json, raw)
+            ?: throw AuthResultException(AuthError.Unexpected("No session returned."))
+        adoptSession(session)
+    }
+
+    /**
+     * The moment a sign-in is *true* is the moment the session is saved — everything after
+     * that is decoration, and must not be allowed to contradict it.
+     *
+     * The previous shape — save, then let [loadProfile]'s network round trip throw out of the
+     * sign-in — reported "sign-in failed" over a session already persisted to disk. The player
+     * was told nothing happened; the next cold start silently signed them in to the account
+     * they were told was never created, and in between, the standing fetch could stamp that
+     * account's rank into a UI claiming nobody was signed in. Worst on the Play Games path,
+     * where the failed-looking attempt *minted* an account the player has no idea exists.
+     *
+     * So: publish the session-derived player immediately — exactly what [restore] does on
+     * every launch — and let the profile round trip be the best-effort catch-up it already is
+     * everywhere else ([refreshProfile] treats its failure as "stale name", not "no account").
+     */
+    private suspend fun adoptSession(session: Session) {
         client.saveSession(session)
-        loadProfile(session)
+        _player.value = session.toPlayer()
+        runCatching { loadProfile(session) }
     }
 
     suspend fun sendPasswordReset(email: String) {
@@ -283,6 +363,14 @@ class AuthRepository(private val client: SupabaseClient) {
             "/rest/v1/profiles?id=eq.${session.userId}&select=display_name,provider",
             authorized = true,
         )
+        // The account may have changed while that request was in flight: a deep link can
+        // adopt a new session concurrently with the launch restore's profile refresh, and
+        // the *authorization* above follows the store (a bearer for the new account, a path
+        // still naming the old one — RLS answers that with an empty row set). Publishing the
+        // stale identity here would leave the UI showing one account while every authorized
+        // write acts as another. If this session is no longer the stored one, the answer is
+        // about somebody who is no longer signed in; drop it.
+        if (client.currentSession()?.userId != session.userId) return
         val row = client.json.parseToJsonElement(raw).jsonArray.firstOrNull()?.jsonObject
         val player = session.toPlayer(
             // The signup trigger always writes one, but fall back rather than crash.
@@ -321,6 +409,11 @@ class AuthRepository(private val client: SupabaseClient) {
     private inline fun <T> call(block: () -> T): T = try {
         block()
     } catch (e: SupabaseClient.SupabaseException) {
+        // The session died *during* the call — refresh refused, store cleared. The account
+        // row on screen is now describing somebody who is no longer signed in; the same
+        // honesty requireSession applies at entry has to apply here, or the UI keeps a
+        // ghost player over an empty session store.
+        if (e.errorCode == "session_missing") _player.value = null
         throw AuthResultException(translate(e))
     } catch (e: java.io.IOException) {
         throw AuthResultException(AuthError.Offline)
@@ -351,8 +444,18 @@ internal fun translateAuthError(errorCode: String?, message: String): AuthError 
         code == "invalid_credentials" || text.contains("invalid login") ->
             AuthError.WrongPassword
 
+        // Before the weak-password match, whose "password should be" substring this
+        // message also contains.
+        code == "same_password" || text.contains("should be different") ->
+            AuthError.SamePassword
+
         code == "weak_password" || text.contains("password should be") ->
             AuthError.WeakPassword
+
+        // Minted by SupabaseClient when a session died mid-call — the refresh was refused
+        // and the store cleared while a request was in flight. The purpose-built copy, not
+        // a raw "permission denied".
+        code == "session_missing" -> AuthError.SessionExpired
 
         code == "reauthentication_needed" || text.contains("requires reauthentication") ->
             AuthError.NeedsRecentSignIn

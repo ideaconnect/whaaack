@@ -114,29 +114,87 @@ fun LeaderboardScreen(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            val standing = state.standing
+            val own = ownStandingRow(state)
             Text(
-                standing?.let { "#${it.rank}" } ?: "—",
+                own.rank,
                 color = AccentLight,
                 fontSize = 13.sp,
                 fontWeight = FontWeight.Black,
             )
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(
+                    own.name,
+                    color = Cream,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Black,
+                )
+                own.note?.let { note ->
+                    Text(note, color = Color(0x80FFF3E6), fontSize = 11.sp)
+                }
+            }
             Text(
-                if (state.signedIn) "${state.player?.displayName} (you)" else "Sign in to rank",
-                color = Cream,
-                fontSize = 13.sp,
-                fontWeight = FontWeight.Black,
-                modifier = Modifier.weight(1f),
-            )
-            Text(
-                standing?.let { LeaderboardRepository.formatScore(it.millis) }
-                    ?: LeaderboardRepository.formatScore(state.prefs.localBestMillis),
+                own.score,
                 color = Cream,
                 fontSize = 14.sp,
                 fontWeight = FontWeight.Black,
             )
         }
     }
+}
+
+/** The three texts of the footer row, plus the line that explains an empty one. */
+internal data class OwnStandingRow(
+    val rank: String,
+    val name: String,
+    /** A caption under the name, or null when there is nothing that needs explaining. */
+    val note: String?,
+    val score: String,
+)
+
+/**
+ * Decides the footer row in one place, so its rank and its score can never disagree about
+ * whose they are.
+ *
+ * The score used to fall back to `prefs.localBestMillis` whenever [UiState.standing] was null
+ * — and null is exactly what the server returns for an account that has never posted a ranked
+ * run. That best belongs to the *device*: it counts casual runs, and it deliberately survives
+ * a log-out, so signing in on a phone somebody else had already played showed a brand-new
+ * account a score of 46,000 next to a rank of "—", as though it had earned it. A number
+ * appears in the score column now only when the server has confirmed it for the account and
+ * the window on screen.
+ */
+internal fun ownStandingRow(state: UiState): OwnStandingRow {
+    // Signed out the row is an invitation, not a claim. The casual best is the device's own
+    // number, it is attached to no rank and no name, and the row is the way in.
+    if (!state.signedIn) return OwnStandingRow(
+        rank = "—",
+        name = "Sign in to rank",
+        note = null,
+        score = LeaderboardRepository.formatScore(state.prefs.localBestMillis),
+    )
+    val name = state.player?.let { "${it.displayName} (you)" } ?: "You"
+    // Only an answer for the window being looked at counts: a weekly standing under the
+    // all-time tab is a real number about the wrong thing.
+    val answered = state.standingScope == state.boardScope
+    val standing = state.standing?.takeIf { answered }
+    if (standing != null) return OwnStandingRow(
+        rank = "#${standing.rank}",
+        name = name,
+        note = null,
+        score = LeaderboardRepository.formatScore(standing.millis),
+    )
+    return OwnStandingRow(
+        rank = "—",
+        name = name,
+        // Said out loud, because a row of dashes reads as a screen still loading — which is
+        // also why it is only said once the server has actually answered.
+        note = when {
+            !answered -> null
+            state.boardScope == BoardScope.WEEKLY -> "No ranked run this week"
+            else -> "No ranked run yet"
+        },
+        score = "—",
+    )
 }
 
 @Composable

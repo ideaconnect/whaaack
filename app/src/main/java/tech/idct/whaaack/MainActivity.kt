@@ -53,6 +53,7 @@ import tech.idct.whaaack.ui.GameScreen
 import tech.idct.whaaack.ui.HomeScreen
 import tech.idct.whaaack.ui.LeaderboardScreen
 import tech.idct.whaaack.ui.OrchardBackdrop
+import tech.idct.whaaack.ui.RankedInviteDialog
 import tech.idct.whaaack.ui.SettingsScreen
 import tech.idct.whaaack.ui.theme.Cream
 import tech.idct.whaaack.ui.theme.WhaaackTheme
@@ -103,7 +104,14 @@ class MainActivity : ComponentActivity() {
 
     private fun handleDeepLink(intent: Intent?) {
         val data = intent?.data ?: return
-        if (data.scheme != "whaaack") return
+        // Host as well as scheme. The manifest filter's host="auth" constrains only
+        // *implicit* intents — an explicit intent from another app arrives here with any
+        // whaaack: URI it likes, and the fragment it carries is a set of tokens this app
+        // would verify and adopt. Verification proves they are SOMEBODY'S live session, not
+        // that this player asked for it: adopting tokens minted for an attacker's account
+        // signs the player into it silently. Checking the host does not close that on its
+        // own, but it holds the door to links shaped exactly like the ones GoTrue sends.
+        if (data.scheme != "whaaack" || data.host != "auth") return
         vm.handleAuthDeepLink(data.fragment)
     }
 
@@ -163,8 +171,10 @@ class MainActivity : ComponentActivity() {
                 vm.setAuthMode(AuthMode.SIGN_UP)
                 vm.go(Screen.AUTH)
             } catch (e: GetCredentialException) {
+                // The exception carries developer diagnostics, not player-facing copy; it
+                // goes to logcat and the ViewModel shows its own fixed line.
                 Log.w("MainActivity", "Google sign-in failed", e)
-                vm.reportGoogleFailure(e.message)
+                vm.reportGoogleFailure()
             }
         }
     }
@@ -255,6 +265,12 @@ private fun WhaaackApp(vm: WhaaackViewModel, onGoogleSignIn: () -> Unit) {
                     onSignIn = { email, pass -> vm.signIn(email, pass) },
                     onSignUp = { email, pass, name -> vm.signUp(email, pass, name) },
                     onGoogle = onGoogleSignIn,
+                    // Both halves: a build with no Game server credential has nothing to
+                    // exchange a code with, and a player Play Games has not authenticated has
+                    // no code to give.
+                    playGamesAvailable = state.playGamesRankingAvailable &&
+                        state.playGamesAuthenticated == true,
+                    onPlayGames = { vm.signInWithPlayGames(activity) },
                     onForgot = { vm.go(Screen.FORGOT) },
                     onSkip = { vm.startGame(ranked = false) },
                 )
@@ -321,6 +337,14 @@ private fun WhaaackApp(vm: WhaaackViewModel, onGoogleSignIn: () -> Unit) {
                     onBuy = { vm.buyRemoveAdsFromAdBreak(activity) },
                     onContinue = { vm.continueThroughAdBreak(activity) },
                     onCancel = { vm.cancelAdBreak() },
+                )
+            }
+
+            state.rankedInvite?.let { invite ->
+                RankedInviteDialog(
+                    state = invite,
+                    onAccept = { vm.acceptRankedInvite(activity) },
+                    onDecline = { vm.declineRankedInvite() },
                 )
             }
 

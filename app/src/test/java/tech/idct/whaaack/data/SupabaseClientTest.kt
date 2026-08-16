@@ -145,6 +145,61 @@ class SupabaseClientTest {
         assertEquals("Bearer minted-access", request.getHeader("Authorization"))
     }
 
+    @Test
+    fun `an authorized request with no session fails as signed-out, not as the anon key`() = runBlocking {
+        // The anon-key fallback used to go out and come back as 42501 "permission denied for
+        // table profiles" — a message about the schema shown to a player whose actual
+        // problem is that they are signed out.
+        store.session = null
+
+        val thrown = assertThrows(SupabaseClient.SupabaseException::class.java) {
+            runBlocking { client.request("GET", "/rest/v1/profiles", authorized = true) }
+        }
+
+        assertEquals(401, thrown.status)
+        assertEquals("session_missing", thrown.errorCode)
+        assertEquals("nothing must reach the network", 0, server.requestCount)
+    }
+
+    @Test
+    fun `a refresh keeps the cached display name the token endpoint knows nothing about`() = runBlocking {
+        // profiles is the authority on the name; user_metadata lags it after every rename
+        // and every trigger de-duplication. The refresh must carry the cache forward, not
+        // regress it to the stale copy riding in the token response.
+        store.session = session(access = "expired-access", expiresInMs = -1_000L)
+            .copy(displayName = "Renamed In Settings")
+        server.enqueue(tokenResponse(access = "minted-access", refresh = "minted-refresh"))
+        server.enqueue(MockResponse().setBody("[]"))
+
+        client.request("GET", "/rest/v1/profiles", authorized = true)
+
+        assertEquals("minted-access", store.session?.accessToken)
+        assertEquals("Renamed In Settings", store.session?.displayName)
+    }
+
+    @Test
+    fun `a refresh landing after sign-out does not resurrect the session`() = runBlocking {
+        // The player signs out while the refresh is on the wire. The rotated tokens the
+        // endpoint answers with belong to a session nobody holds any more; writing them
+        // into the cleared store would resurrect tokens /logout just revoked.
+        store.session = session(access = "expired-access", expiresInMs = -1_000L)
+        server.enqueue(tokenResponse(access = "minted-access", refresh = "minted-refresh"))
+        // The mock answers instantly, so the interleave is staged in the store instead: the
+        // path reads current() twice before the network (validAccessToken's expiry check,
+        // then refreshSession's re-check under the lock) and once after, for the guard.
+        // Clearing after the second read is "signed out while the refresh was on the wire".
+        store.clearAfterReads = 2
+
+        val thrown = assertThrows(SupabaseClient.SupabaseException::class.java) {
+            runBlocking { client.request("GET", "/rest/v1/profiles", authorized = true) }
+        }
+
+        // The rotated tokens are dropped, the store stays signed out, and the request
+        // reports the player signed out rather than proceeding on tokens just revoked.
+        assertEquals("session_missing", thrown.errorCode)
+        assertNull(store.session)
+    }
+
     // ---- fixtures --------------------------------------------------------------------
 
     private fun session(
@@ -185,7 +240,19 @@ class SupabaseClientTest {
 private class InMemorySessionStore : SessionStore {
     var session: Session? = null
 
-    override suspend fun current(): Session? = session
+    /**
+     * When set, the store empties itself after this many [current] reads — the in-memory
+     * stand-in for a sign-out landing while a refresh is on the wire.
+     */
+    var clearAfterReads: Int? = null
+    private var reads = 0
+
+    override suspend fun current(): Session? {
+        val answer = session
+        reads++
+        clearAfterReads?.let { if (reads >= it) session = null }
+        return answer
+    }
 
     override suspend fun save(session: Session) {
         this.session = session

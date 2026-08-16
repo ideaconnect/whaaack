@@ -100,6 +100,20 @@ class SupabaseClient(
         extraHeaders: Map<String, String> = emptyMap(),
     ): String {
         var token = if (authorized) validAccessToken() else null
+        // An authorized request with no token must fail as what it is, not fall through to
+        // the anon key. The fallback looked harmless when RLS answered anon writes with an
+        // empty row set, but the column grants hardening turned those into 42501 "permission
+        // denied for table …" — a message about our schema shown to a player whose actual
+        // problem is that their session died mid-call (refresh refused, store cleared while
+        // this request was being built). The one caller that wants best-effort — signOut's
+        // logout — already swallows this. `session_missing` maps to AuthError.SessionExpired.
+        if (authorized && token == null) {
+            throw SupabaseException(
+                status = 401,
+                errorCode = "session_missing",
+                message = "Signed out: there is no session behind this request.",
+            )
+        }
 
         suspend fun attempt(withToken: String?): String {
             val req = builder(path, authorized, withToken).apply {
@@ -158,10 +172,12 @@ class SupabaseClient(
      * token from the one that failed — a token that has already been replaced is worth
      * retrying with, and re-spending the refresh token on it is not.
      *
-     * Returns null only when there is nothing to refresh: no session, or a refresh token the
-     * server rejected outright (which also clears the store). A failure that says nothing
-     * about the token — an outage, a rate limit — is thrown instead, so no caller can
-     * mistake it for a dead session.
+     * Returns null only when there is nothing to refresh: no session, a refresh token the
+     * server rejected outright (which also clears the store), or a store that was signed out
+     * or replaced while the refresh was on the wire — the rotated tokens then belong to a
+     * session nobody holds any more, and are dropped rather than saved. A failure that says
+     * nothing about the token — an outage, a rate limit — is thrown instead, so no caller
+     * can mistake it for a dead session.
      */
     suspend fun refreshSession(rejected: String? = null): Session? = refreshLock.withLock {
         val existing = sessions.current() ?: return null
@@ -197,12 +213,29 @@ class SupabaseClient(
         // truncated or proxy-mangled body rather than a server error. `execute` hands a 204 or
         // an empty body back as "", which parses to null, so this is not a hypothetical shape.
         // The store is deliberately left alone: nothing here says the refresh token is spent.
-        val session = Session.fromTokenResponse(json, raw)
+        val parsed = Session.fromTokenResponse(json, raw)
             ?: throw SupabaseException(
                 status = 502,
                 errorCode = null,
                 message = "The sign-in service returned a response with no session in it.",
             )
+        // Two corrections before the rotated tokens are persisted, both protecting state the
+        // token endpoint knows nothing about:
+        //
+        // The display name: fromTokenResponse reads user_metadata, but the profiles table is
+        // the authority — renames PATCH only profiles, and the signup trigger de-duplicates —
+        // so user_metadata routinely disagrees with the name on the board. Persisting the
+        // parsed session as-is regressed the cached name on every routine hourly refresh,
+        // which is the exact clobber the single-key saveDisplayName exists to prevent.
+        //
+        // The store itself: a player can sign out while this refresh is on the wire, and a
+        // save landing after that clear writes revoked tokens back into an empty store —
+        // never resurrect a session that was signed out while the request was in flight.
+        // The refresh token is the identity check: this save is only valid as the successor
+        // of the exact session that was spent to mint it.
+        val current = sessions.current()
+        if (current?.refreshToken != existing.refreshToken) return null
+        val session = parsed.copy(displayName = current?.displayName ?: parsed.displayName)
         sessions.save(session)
         return session
     }

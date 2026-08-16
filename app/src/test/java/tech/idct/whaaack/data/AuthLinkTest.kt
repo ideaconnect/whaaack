@@ -76,6 +76,31 @@ class AuthLinkTest {
     }
 
     @Test
+    fun `the double-confirm halfway link speaks instead of vanishing`() {
+        // With double_confirm_changes on, the first of the two email-change links comes back
+        // with no tokens and no error — only a `message`. Dropping it into Ignored was the
+        // same watched-the-app-open-and-nothing-happened dead end Failed exists to prevent.
+        val link = parseAuthFragment(
+            "message=Confirmation+link+accepted.+Please+proceed+to+confirm+link+sent+to+the+other+email",
+        )
+        assertTrue(link is AuthLink.Notice)
+        assertTrue("other inbox" in (link as AuthLink.Notice).message)
+    }
+
+    @Test
+    fun `an unrecognised message keeps the server's own words`() {
+        val link = parseAuthFragment("message=Something+else+entirely")
+        assertEquals(AuthLink.Notice("Something else entirely"), link)
+    }
+
+    @Test
+    fun `tokens outrank a message riding beside them`() {
+        // A link carrying both is a session first; the message must not eat the sign-in.
+        val link = parseAuthFragment("access_token=a&refresh_token=b&message=hello")
+        assertTrue(link is AuthLink.Tokens)
+    }
+
+    @Test
     fun `a missing expires_in falls back to GoTrue's own default`() {
         val tokens = parseAuthFragment("access_token=a&refresh_token=b") as AuthLink.Tokens
         assertEquals(3600L, tokens.expiresInSeconds)

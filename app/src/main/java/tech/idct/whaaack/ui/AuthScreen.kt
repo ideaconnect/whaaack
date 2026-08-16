@@ -48,6 +48,8 @@ fun AuthScreen(
     onSignIn: (String, String) -> Unit,
     onSignUp: (String, String, String) -> Unit,
     onGoogle: () -> Unit,
+    playGamesAvailable: Boolean,
+    onPlayGames: () -> Unit,
     onForgot: () -> Unit,
     onSkip: () -> Unit,
 ) {
@@ -63,7 +65,10 @@ fun AuthScreen(
             .verticalScroll(rememberScrollState())
             .padding(horizontal = 22.dp, vertical = 16.dp),
     ) {
-        CircleIconButton("‹", onBack)
+        // Held while a sign-in is in flight, same as the Skip control below: the busy flag
+        // disables the provider buttons, but an exit that stays live re-opens the mint offer
+        // on Home while the first attempt is still on the wire.
+        CircleIconButton("‹", onBack, enabled = !state.busy)
         Spacer(Modifier.height(14.dp))
         Text(
             if (signUp) "Create account" else "Welcome back",
@@ -98,6 +103,31 @@ fun AuthScreen(
                 "Google sign-in isn't available right now — use email instead.",
                 color = Color(0x8AFFF3E6),
                 fontSize = 11.sp,
+            )
+        }
+
+        // Only for a player Play Games has already authenticated. Offering it to anyone else
+        // would be a button that opens nothing: there is no sign-in flow of ours behind it —
+        // the SDK signs people in by itself at launch, and all this can do is trade that for
+        // a Whaaack! account. The Settings screen is where a player goes to get Play Games
+        // itself signed in.
+        if (playGamesAvailable) {
+            Spacer(Modifier.height(10.dp))
+            PlayGamesSignInButton(
+                // Same label either way, and it is honest in both: this creates the account if
+                // there isn't one and signs into it if there is, with nothing for the player
+                // to fill in. The "Create account" tab has no bearing on it.
+                label = "Continue with Play Games",
+                enabled = !state.busy,
+                onClick = onPlayGames,
+            )
+            Spacer(Modifier.height(6.dp))
+            Text(
+                "Uses the Play Games profile you're already signed in to. Your Play Games " +
+                    "name will appear on the leaderboard.",
+                color = Color(0x8AFFF3E6),
+                fontSize = 11.sp,
+                lineHeight = 15.sp,
             )
         }
 
@@ -189,7 +219,11 @@ fun AuthScreen(
             textAlign = TextAlign.Center,
             modifier = Modifier
                 .fillMaxWidth()
-                .clickableOnce(true, onSkip)
+                // Held while a sign-in is in flight, like every other control here: leaving
+                // for the game mid-round-trip meant the completion landed on top of a live
+                // run. The ViewModel also refuses to navigate a player who left — this is
+                // the belt to that braces.
+                .clickableOnce(!state.busy, onSkip)
                 .padding(12.dp),
         )
     }

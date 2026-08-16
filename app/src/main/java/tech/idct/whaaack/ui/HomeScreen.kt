@@ -38,6 +38,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import tech.idct.whaaack.UiState
+import tech.idct.whaaack.data.BoardScope
 import tech.idct.whaaack.data.LeaderboardRepository
 import tech.idct.whaaack.game.Fruit
 import tech.idct.whaaack.game.GameAssets
@@ -127,14 +128,8 @@ fun HomeScreen(
                 }
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     Text(player.displayName, color = Cream, fontSize = 15.sp, fontWeight = FontWeight.Black)
-                    // Prefer the ranked best the server knows about; fall back to the
-                    // device's casual best until the standing has loaded.
-                    val bestMillis = state.standing?.millis?.toLong()
-                        ?: state.prefs.localBestMillis
-                    val best = LeaderboardRepository.formatScore(bestMillis)
-                    val rank = state.standing?.rank?.let { " · Rank #$it" }.orEmpty()
                     Text(
-                        "Best $best$rank",
+                        playerBestLine(state),
                         color = Color(0x9EFFF3E6),
                         fontSize = 12.sp,
                         fontWeight = FontWeight.SemiBold,
@@ -157,7 +152,10 @@ fun HomeScreen(
         // the honest thing to show is neither.
         if (!state.sessionResolved) {
             SessionLoader()
-        } else if (state.signedIn) {
+        } else if (state.offersRanked) {
+            // Also the pair a Play Games player sees before they have an account: theirs can
+            // be made from the identity they already have, so "sign in first" would be asking
+            // them to do something we can do for them. The tap raises the invitation.
             PrimaryButton("Play ranked", onClick = onPlayRanked)
             Spacer(Modifier.height(14.dp))
             SecondaryButton("Play for fun", onClick = onPlayCasual)
@@ -191,6 +189,29 @@ fun HomeScreen(
             RemoveAdsButton(price = state.removeAdsPrice.orEmpty(), onClick = onRemoveAds)
         }
     }
+}
+
+/**
+ * The line under the player's name on the account card.
+ *
+ * "Best" means their *ranked* best — the number the leaderboard would show them — so it is
+ * printed only once the server has confirmed one for the all-time board. Everything else is
+ * labelled as the casual best it actually is, and carries no rank.
+ *
+ * The distinction is the whole point. `prefs.localBestMillis` counts every run played on this
+ * device, including runs played for fun and runs played by whoever held the phone before this
+ * account signed in, and it deliberately outlives a log-out. Printing it as "Best" under a
+ * name was what made a freshly created account claim 46 seconds it had never played.
+ */
+internal fun playerBestLine(state: UiState): String {
+    val ranked = state.standing?.takeIf { state.standingScope == BoardScope.ALL_TIME }
+    if (ranked != null) {
+        val best = LeaderboardRepository.formatScore(ranked.millis)
+        return "Best $best · Rank #${ranked.rank}"
+    }
+    val local = state.prefs.localBestMillis
+    if (local <= 0L) return "No runs yet"
+    return "Casual best ${LeaderboardRepository.formatScore(local)}"
 }
 
 /**

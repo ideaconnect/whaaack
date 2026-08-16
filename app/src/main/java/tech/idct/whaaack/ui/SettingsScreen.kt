@@ -207,7 +207,14 @@ fun SettingsScreen(
                                 fontWeight = FontWeight.Black,
                             )
                             Text(
-                                if (player.isGoogle) "Google account" else player.email.orEmpty(),
+                                when {
+                                    player.isGoogle -> "Google account"
+                                    // Never their address: a Play Games account's is a derived
+                                    // identifier at a domain that cannot receive mail, and
+                                    // showing it invites them to try to use it.
+                                    player.isPlayGames -> "Play Games account"
+                                    else -> player.email.orEmpty()
+                                },
                                 color = Color(0x9EFFF3E6),
                                 fontSize = 11.sp,
                             )
@@ -219,7 +226,9 @@ fun SettingsScreen(
                         "Changeable once every 30 days",
                     ) { sheet = Sheet.NAME }
 
-                    if (!player.isGoogle) {
+                    // Both federated kinds are held by their provider. Offering either row
+                    // for one is offering a control that can only fail.
+                    if (player.hasPassword) {
                         ActionRow("Email", player.email.orEmpty()) { sheet = Sheet.EMAIL }
                         ActionRow("Password", "••••••••") { sheet = Sheet.PASSWORD }
                     }
