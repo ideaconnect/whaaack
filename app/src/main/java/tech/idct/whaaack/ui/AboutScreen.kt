@@ -1,5 +1,6 @@
 package tech.idct.whaaack.ui
 
+import androidx.annotation.DrawableRes
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -14,6 +15,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBarsPadding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -23,6 +25,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
@@ -52,6 +55,9 @@ private val CREDITS = listOf(
 // and a second copy of these strings is a second thing to forget when a URL moves.
 internal const val PRIVACY_URL = "https://idct.tech/whaaack/privacy"
 internal const val TERMS_URL = "https://idct.tech/whaaack/terms"
+
+/** The studio, not a document — nothing else links here, so it stays private. */
+private const val IDCT_URL = "https://idct.tech"
 
 @Composable
 fun AboutScreen(onBack: () -> Unit) {
@@ -109,11 +115,15 @@ fun AboutScreen(onBack: () -> Unit) {
                     // and with no crash reporter the version a player reads off this screen
                     // is the only way to know which build a bug report came from. The code
                     // is what Play Console and Android vitals key on, so show that too.
-                    "Version ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE}) · built by IDCT",
+                    // The byline that used to hang off this line is the card below now, which
+                    // says the same thing with the logo and a link on it.
+                    "Version ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})",
                     color = Color(0xB8FFF3E6),
                     fontSize = 12.sp,
                 )
             }
+
+            LinkRow("Built by IDCT", "idct.tech", icon = R.drawable.logo_idct) { open(IDCT_URL) }
 
             // Both documents, not just the privacy policy: Play expects the terms to be
             // reachable from inside the app once there is something to buy.
@@ -169,9 +179,22 @@ fun AboutScreen(onBack: () -> Unit) {
     }
 }
 
-/** One tappable row pointing at a page on the website. */
+/**
+ * One tappable row pointing at a page on the website, with an optional mark in front of it.
+ *
+ * [icon] is tinted rather than drawn as it comes, because the only thing that uses it is the
+ * IDCT logo: a black silhouette with its highlights punched through as holes, which on this
+ * screen's near-black cards would be a row with a gap where the logo should be. Cream is what
+ * the rest of the row is written in, and the holes let the card show through, so the mark
+ * reads the way it does on any dark surface rather than needing a white patch behind it.
+ */
 @Composable
-private fun LinkRow(title: String, url: String, onClick: () -> Unit) {
+private fun LinkRow(
+    title: String,
+    url: String,
+    @DrawableRes icon: Int? = null,
+    onClick: () -> Unit,
+) {
     Row(
         Modifier
             .fillMaxWidth()
@@ -182,6 +205,21 @@ private fun LinkRow(title: String, url: String, onClick: () -> Unit) {
             .padding(16.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        icon?.let {
+            Image(
+                painter = painterResource(it),
+                // Named on the row it belongs to: a screen reader reaching this reads the
+                // title and url either way, and "IDCT logo" before them would be noise.
+                contentDescription = null,
+                colorFilter = ColorFilter.tint(Cream),
+                // Sized off the wordmark under the squirrel rather than the row: the mark is a
+                // lockup, and at anything smaller the IDCT below it stops being legible before
+                // the emblem above it does. This is about as tall as the two lines beside it,
+                // so it does not drive the row's height either way.
+                modifier = Modifier.size(52.dp),
+            )
+            Spacer(Modifier.width(14.dp))
+        }
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Text(title, color = Cream, fontSize = 14.sp, fontWeight = FontWeight.Black)
             Text(url, color = Color(0x9EFFF3E6), fontSize = 11.sp)
