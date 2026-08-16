@@ -414,7 +414,10 @@ above were never set.
 - [ ] Confirm the AdMob unit `…/2703686934` is of type **Interstitial** (section 4)
 - [x] Create and activate the one-time product `no.ads.forever` (section 5)
 - [ ] Run the purchase matrix from Play, with licence testers (section 5)
-- [ ] Second Android OAuth client on the debug SHA-1, so PGS works locally (section 7)
+- [~] Second Android OAuth client on the debug SHA-1 — **deliberately not done**. Play
+      re-signs with `B0:83:…`, which the existing credentials already carry, so Google
+      sign-in and PGS work from an internal-testing track onwards. The accepted cost is
+      that neither can be tested on a locally built APK. See PLAY-GAMES.md §2.
 - [x] Create the four achievements; their ids are committed (section 7)
 - [ ] Upload `PlayerGameEvent.csv` and `GameStats.zip` for Game Stats (section 7)
 - [ ] Add Play Games testers, then **publish** the PGS configuration (section 7)

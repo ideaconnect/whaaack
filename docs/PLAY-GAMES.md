@@ -78,19 +78,37 @@ correct fingerprint for what players install, and the wrong one for anything you
 a Google OAuth Android client holds exactly one SHA-1, so with `B0:83:…` on it, **no locally
 built APK will authenticate** — not a debug build, not even one signed with the upload key.
 
-Two consequences, both worth acting on before testing:
+### Confirmed on device, and the decision taken (2026-08-16)
 
-1. **Add a second Android OAuth client** carrying the debug SHA-1 above, and register it in
-   Play Games Services → Configuration → Credentials as another Android credential. PGS
-   accepts several; Google Cloud's OAuth clients only hold one fingerprint each.
-2. **Check `GOOGLE_WEB_CLIENT_ID` still works.** [SETUP.md §3](SETUP.md#3-google-sign-in)
-   records the debug SHA-1 as living on this same client. If setting `B0:83:…` replaced it
-   rather than being added to a new client, Google *sign-in* on debug builds is broken too,
-   and the symptom is the same silence.
+The second consequence above was not hypothetical: `B0:83:…` *did* replace the debug SHA-1 on
+the shared client, so Google sign-in is broken on local builds too. A debug build on a real
+phone says so plainly in logcat:
 
-The alternative to all of this is to test from an internal-testing track build, which Play
-has re-signed with `B0:83:…` and which therefore matches — worth knowing, but a slow loop to
-develop against.
+```
+Auth: [GetTokenResponseHandler] Server returned error: This android application is not
+registered to use OAuth2.0, please confirm the package name and SHA-1 certificate
+fingerprint match what you registered in Google Developer Console.
+Auth.Api.Credentials: [GetGoogleIdOperation] Operation failed. couf: [28444]
+```
+
+Google rejects the *caller* — package plus signing certificate — before any token exists, so
+it never reaches Supabase and no amount of app-side configuration changes it. Both Google
+sign-in and Play Games fail from the same cause.
+
+**Deliberately left as it is.** A build distributed through Play is re-signed with `B0:83:…`,
+which is exactly what these credentials carry, so both work from an internal-testing track
+onwards. Adding a second Android OAuth client on the debug SHA-1 would buy a faster local
+loop and nothing else; the cost accepted instead is that **Google sign-in and Play Games
+cannot be tested on a locally built APK at all** — not debug, and not a release build signed
+with the upload key either, since `B0:83:…` is Play App Signing's certificate rather than
+ours. Test both from a track build.
+
+If that trade stops being worth it, the fix is unchanged: create an Android OAuth client in
+`whaaack-505409` for package `tech.idct.whaaack` with the debug SHA-1 above, and register it
+in Play Games Services → Configuration → Credentials as an additional Android credential. PGS
+accepts several; Google Cloud's OAuth clients hold one fingerprint each. No rebuild is needed
+— only the *web* client id is compiled in, and the Android one is matched server-side at
+runtime.
 
 ---
 
