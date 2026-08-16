@@ -58,58 +58,37 @@ RLS: profiles are world-readable (names appear on the board), scores are readabl
 their owner. Aggregate standings come from `SECURITY DEFINER` functions, so a client can
 see the board without being able to enumerate other players' raw rows.
 
-### ⚠️ Outstanding: SMTP password
+### SMTP — verified working (2026-08-16)
 
-**Auth emails do not send yet.** Signup, password reset and email-change confirmation all
-fail with `Error sending confirmation email` until this is fixed. It is a one-minute fix in
-the dashboard.
+A live signup probe against the project (`bartosz+smtptest@idct.tech`) returned 200 with a
+real user, a populated `identities` array and a `confirmation_sent_at` timestamp — GoTrue
+answers 500 `Error sending confirmation email` when the mailer is down, so this is proof the
+password is configured remotely. The mailer runs through the dashboard's SMTP settings
+(`smtp.resend.com:587`, user `resend`, the Resend key as password, sender
+`noreply@idct.tech`).
 
-What was verified:
+Worth keeping for the next secret rotation: `supabase config push` cannot carry a
+secret-only change. Before diffing, the CLI replaces every local secret with the value the
+remote already holds, so `pass = "env(RESEND_API_KEY)"` on its own always compares "up to
+date". A rotated key goes in through the dashboard, or rides a push that also changes some
+visible field — with `RESEND_API_KEY` exported, or the literal string `env(RESEND_API_KEY)`
+becomes the password.
 
-- The Resend API key is valid and **send-only** (it cannot list domains — good practice).
-- `idct.tech` **is** a verified sending domain: a test message from
-  `noreply@idct.tech` was accepted by the Resend API (HTTP 200).
-- The SMTP credentials work directly — `smtp.resend.com` authenticated and accepted mail on
-  ports **587, 465 and 2587** from a plain SMTP client using user `resend` and the API key
-  as the password.
-- Despite that, Supabase still reports `Error sending confirmation email`, and
-  `supabase config push` reports "Remote Auth config is up to date" *even with
-  `RESEND_API_KEY` unset*.
-
-**Why the push does nothing:** before diffing, the CLI replaces every local secret with the
-value the remote already holds — so a change that touches *only* a secret compares equal to
-the remote and nothing is sent. `pass = "env(RESEND_API_KEY)"` can therefore never be pushed
-on its own. It rides along only when some other, visible field also changed, and then the
-whole body goes up at once. Enabling Google (section 3) is exactly such a change, so that
-push should carry the password too — which also means `RESEND_API_KEY` must be exported when
-you run it, or the literal string `env(RESEND_API_KEY)` gets written as the password.
-
-**Fix:** paste the key directly in the dashboard —
-Supabase → Authentication → Emails → SMTP Settings:
-
-| Field | Value |
-| --- | --- |
-| Host | `smtp.resend.com` |
-| Port | `587` |
-| Username | `resend` |
-| Password | the Resend API key |
-| Sender email | `noreply@idct.tech` |
-| Sender name | `Whaaack!` |
-
-Then confirm with:
+To re-verify after any change:
 
 ```bash
 curl -X POST "$SUPABASE_URL/auth/v1/signup" -H "apikey: $ANON" \
   -H 'Content-Type: application/json' \
-  -d '{"email":"you@example.com","password":"Orchard12345","data":{"display_name":"Tester"}}'
+  -d '{"email":"you+probe@yourdomain","password":"Orchard12345","data":{"display_name":"SMTP Probe"}}'
 ```
 
-A `200` with a `user` object (and no `access_token`, because confirmation is on) means mail
-is going out.
+A `200` whose user has a non-empty `identities` array and a `confirmation_sent_at` means
+mail went out (delete the probe user in the dashboard afterwards). A `200` with an *empty*
+`identities` array means the address already has an account — that is the enumeration
+shield, not a mailer answer.
 
-Everything downstream of this is already verified working end to end: signup → profile
-trigger → sign-in → score insert → all-time and weekly boards → own standing → account
-deletion cascade.
+Everything downstream is verified working end to end: signup → profile trigger → sign-in →
+score insert → all-time and weekly boards → own standing → account deletion cascade.
 
 ---
 
@@ -160,16 +139,21 @@ unused by the native flow and auto-added `supabase.co` to the consent screen's a
 domains. Harmless while the app needs no verification review; drop both if you ever want
 that list to contain only domains you own.
 
-### Still to do: push the provider
+### Done: the provider is live remotely
 
-`enabled = true` is already set under `[auth.external.google]`. The remote still needs it:
+`GET /auth/v1/settings` on the project answers `"google": true` (checked 2026-08-16), so the
+remote has the provider enabled and there is nothing left to push. For a future change —
+rotating the web secret, adding a client id — the shape is:
 
 ```bash
 GOOGLE_CLIENT_ID="964578061899-aaiu8iv8u6fngd93to4vkma91abip7k8.apps.googleusercontent.com,964578061899-o3srji4j87lltkc3bphbsv6o6hj4t9b1.apps.googleusercontent.com" \
-GOOGLE_CLIENT_SECRET="<web secret from secrets/>" \
-RESEND_API_KEY="<resend key>" \
+GOOGLE_CLIENT_SECRET="<web secret from secrets/oauth/web_client_secret_*.json>" \
+RESEND_API_KEY="<resend key, secrets/resend.txt>" \
 supabase config push
 ```
+
+(All three exported together, because the push sends the whole body at once — see the SMTP
+note in section 2 for why a secret-only change never diffs.)
 
 Both ids go in `GOOGLE_CLIENT_ID`, web first — the remote splits on the comma into the
 client id plus the dashboard's *Authorized Client IDs*, which is what makes Supabase accept
@@ -362,6 +346,12 @@ the identity they already hold. Design and testing notes live in
 Nothing here is required to ship. With `PGS_SERVER_CLIENT_ID` blank the feature is inert and
 ranked play needs a sign-up, as it did before.
 
+**Status (2026-08-16): steps 2–4 are done** — the id is in `local.properties`, both secrets
+are set, and the deployed function answers a garbage code with `code_rejected`, which proves
+the gateway lets it run, the apikey gate passes, and the exchange reaches Google. Step 1 is
+the one still open: the web client `…aaiu8iv8u…` must be registered as a **Game server**
+credential in the Play Games Services console, or the SDK will not issue codes for it.
+
 ### Step 1 — a Game server credential
 
 Play Console → Play Games Services → Setup and management → Configuration → **Add credential**
@@ -416,10 +406,10 @@ above were never set.
 
 ## 10. Before release
 
-- [ ] Fix SMTP (section 2) — signup is broken without it
+- [x] SMTP — verified working by a live signup probe, 2026-08-16 (section 2)
 - [x] Google **Android** OAuth client (section 3)
 - [x] Google **web** OAuth client and `GOOGLE_WEB_CLIENT_ID` (section 3)
-- [ ] `supabase config push` to enable the Google provider remotely (section 3)
+- [x] Google provider live remotely — `/auth/v1/settings` answers `"google": true` (section 3)
 - [ ] Publish the Google OAuth consent screen to Production (section 3)
 - [ ] Confirm the AdMob unit `…/2703686934` is of type **Interstitial** (section 4)
 - [x] Create and activate the one-time product `no.ads.forever` (section 5)
@@ -428,8 +418,12 @@ above were never set.
 - [x] Create the four achievements; their ids are committed (section 7)
 - [ ] Upload `PlayerGameEvent.csv` and `GameStats.zip` for Game Stats (section 7)
 - [ ] Add Play Games testers, then **publish** the PGS configuration (section 7)
-- [ ] Game server credential + `PGS_SERVER_CLIENT_ID` + the two function secrets, then
-      `supabase functions deploy play-games-auth` (section 9) — optional; blank is inert
+- [x] `PGS_SERVER_CLIENT_ID` set, both function secrets set, `play-games-auth` deployed and
+      smoke-tested (a garbage code answers `code_rejected`, proving the whole chain to
+      Google's token endpoint) — 2026-08-16 (section 9)
+- [ ] Register the web client as a **Game server** credential in Play Games Services →
+      Configuration → Credentials (section 9). Until then `requestServerSideAccess` issues
+      no codes and every mint fails with "Play Games couldn't confirm your account".
 - [ ] Clear `REMOVE_ADS_PLACEHOLDER_PRICE` from `local.properties` before believing a
       pre-release build's upsell (section 5) — it is debug-only, but it is also a lie
 - [ ] Publish the privacy policy at `https://idct.tech/whaaack/privacy` (linked from About)
