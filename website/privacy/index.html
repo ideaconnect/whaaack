@@ -260,11 +260,10 @@
     If your device has no Play Games profile, or you have signed out of it, that automatic
     attempt finds nothing, no achievements or statistics are ever sent, and the rest of the game
     is unaffected.</p>
-    <p>One consequence worth stating, because it is easy to miss: the Play Games SDK keeps its
-    own state on your device as part of that sign-in, and it does so before the advertising
-    consent form has been shown, because the two are unrelated — that form governs advertising
-    and nothing else. We treat this as part of providing the achievements the app offers rather
-    than as advertising storage, and signing out of Play Games is what prevents it.</p>
+    <p>One consequence worth stating, because it is easy to miss: the SDK keeps state of its own
+    on your device as part of that sign-in, and therefore does so before you have agreed to
+    anything. We treat that as part of providing the achievements the app offers, not as
+    advertising storage — and signing out of Play Games is what prevents it.</p>
 
     <h3>What we send Google</h3>
     <p>When you are signed in to Play Games, and only then, the app reports:</p>
