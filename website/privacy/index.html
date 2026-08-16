@@ -241,10 +241,13 @@
     one.</p>
 
     <h3>It starts by itself</h3>
-    <p>Play Games version 2 has no sign-in button for an app to offer. The app initialises the
-    Play Games SDK when it starts, and the SDK signs you in automatically against whichever Play
-    Games profile your device already has — <strong>before you have touched anything in the app,
-    and independently of the advertising consent form</strong>, which governs advertising only.
+    <p>The app initialises the Play Games SDK when it starts, and the SDK signs you in
+    automatically against whichever Play Games profile your device already has —
+    <strong>before you have touched anything in the app, and independently of the advertising
+    consent form</strong>, which governs advertising only. That first attempt is the SDK's, not
+    ours: version 2 performs it without asking us or you. (If it does not succeed, the app does
+    offer a Play Games sign-in you can press — in <em>Settings</em>, and on the sign-in screen —
+    but those are invitations after the fact, not the thing that starts it.)
     If your device has no Play Games profile, or you have signed out of it, that automatic
     attempt finds nothing, no achievements or statistics are ever sent, and the rest of the game
     is unaffected.</p>
@@ -263,20 +266,28 @@
       milliseconds and in seconds), how much fruit you hit, how much escaped, the top speed you
       reached, and whether the run was ranked. Including a run you back out of before it starts,
       which reports as a zero.</li>
-      <li><strong>Your best run so far</strong>, re-sent each time the app comes to the
-      foreground and after a Play Games sign-in, so a profile is not left showing less than you
-      have actually done — including runs you played before you were signed in.</li>
+      <li><strong>Your best run so far</strong> — sent alongside every run above, and again
+      each time the app comes to the foreground and after a Play Games sign-in, so a profile is
+      not left showing less than you have actually done, including runs you played before you
+      were signed in.</li>
     </ul>
-    <p>All of it is attached to your Play Games profile, not to any Whaaack! account, and it is
-    the game's own numbers — nothing about your device, your location or your identity beyond
-    the Play Games profile you are already signed in to.</p>
+    <p>Each of these is uploaded as it happens rather than batched for later. All of it is
+    attached to your Play Games profile, not to any Whaaack! account, and it is the game's own
+    numbers — nothing about your device, your location or your identity beyond the Play Games
+    profile you are already signed in to. The one field that says anything else is
+    <em>whether the run was ranked</em>, which implies you also hold a Whaaack! account, since
+    only those can play ranked.</p>
 
     <h3>Who controls it</h3>
     <p>Google is an <strong>independent controller</strong> for your Play Games profile and for
     everything on it. Their handling is governed by the
     <a href="https://policies.google.com/privacy" rel="noopener">Google Privacy Policy</a> and
-    the Play Games Services terms, not by this one. We can send achievements and statistics to
-    that profile; we cannot read your friends, your other games, or anything else on it.</p>
+    the Play Games Services terms, not by this one. We send achievements and statistics to that
+    profile and read nothing back from it — not your friends, not your other games. The single
+    exception is the account-creation flow below, where our backend exchanges a one-time code
+    with Google and uses the resulting access token exactly once, to ask Google who you are. We
+    deliberately do not request offline access, so no lasting key to your profile is issued to
+    us or stored by us.</p>
 
     <h3>How to stop it</h3>
     <p>Sign out of Play Games — in the Play Games app, or in your device's Google settings. From
@@ -285,9 +296,13 @@
     there is nothing of yours held here to switch off.</p>
     <p>To clear what Google already has, use Google's own controls — the route is in
     <a href="#deletion">section 7</a>, and it works whether or not you ever had a Whaaack!
-    account. You may also object to this processing under Art. 21 GDPR through the
-    <a href="/whaaack/contact/">contact form</a>, though signing out is faster and needs nobody's
-    help.</p>
+    account.</p>
+    <p>You may also object to this processing under Art. 21 GDPR through the
+    <a href="/whaaack/contact/">contact form</a>. In candour about what that achieves: we hold
+    no per-player switch to flip, because the sending is decided on your device by whether Play
+    Games is signed in. Signing out is therefore both the faster remedy and the complete one,
+    and it is entirely in your hands. If you object to us, what we can do is confirm the
+    position and help you apply it.</p>
 
     <h3>If you use Play Games to create a Whaaack! account</h3>
     <p>Signing in to Play Games does <em>not</em> create an account by itself. If you choose

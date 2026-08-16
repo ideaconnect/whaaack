@@ -150,9 +150,18 @@ Deno.serve(async (req: Request): Promise<Response> => {
     return failed(502, "no_player_id", { received: Object.keys(player ?? {}) });
   }
   // The gamer tag is a suggestion, not an identity: handle_new_user() sanitises it into the
-  // shape profiles accepts and de-duplicates it against the board, and falls back to a
-  // generated name if it cannot. Nothing here depends on it being present or sane.
-  const gamerTag: string = typeof player?.displayName === "string" ? player.displayName : "";
+  // shape profiles accepts and de-duplicates it against the board. Nothing here depends on it
+  // being present or sane.
+  //
+  // Except in one way, which is why the fallback is spelled out rather than left to the
+  // trigger. Handed an empty name, handle_new_user() falls back to the local part of the
+  // email — and for these accounts that address is derived from the player ID, so a missing
+  // gamer tag would publish `pgs-<playerId>` as the display name on a *public* leaderboard.
+  // Play Games makes a gamer tag mandatory, so this should be unreachable; it is guarded
+  // anyway, because the failure mode is leaking an identifier and the guard costs one line.
+  // "Player" is what the trigger's own last resort uses, and it de-duplicates from there.
+  const tag = typeof player?.displayName === "string" ? player.displayName.trim() : "";
+  const gamerTag = tag.length > 0 ? tag : "Player";
 
   // ---- 3. find or create the account ---------------------------------------------------
 
