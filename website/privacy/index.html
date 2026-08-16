@@ -125,8 +125,9 @@
           <code>pgs-&lt;player&nbsp;ID&gt;@pgs.whaaack.invalid</code>, for Play Games accounts</td>
           <td>Our sign-in system requires every account to carry an address, so one is generated
           from the player ID. It is an internal label, not a mailbox: <code>.invalid</code> is a
-          reserved domain that can never receive mail, so nothing is ever sent there and no
-          password reset can be attempted against it.</td>
+          reserved domain that can never receive mail, so no message could ever arrive there —
+          and the app never offers an email or password row for such an account, because there is
+          neither to change.</td>
           <td>Art. 6(1)(b).</td>
           <td>Until you delete the account.</td>
         </tr>
@@ -244,17 +245,24 @@
     Play Games SDK when it starts, and the SDK signs you in automatically against whichever Play
     Games profile your device already has — <strong>before you have touched anything in the app,
     and independently of the advertising consent form</strong>, which governs advertising only.
-    If your device has no Play Games profile, or you have signed out of it, nothing here happens
-    at all and the rest of the game is unaffected.</p>
+    If your device has no Play Games profile, or you have signed out of it, that automatic
+    attempt finds nothing, no achievements or statistics are ever sent, and the rest of the game
+    is unaffected.</p>
+    <p>One consequence worth stating, because it is easy to miss: the Play Games SDK keeps its
+    own state on your device as part of that sign-in, and it does so before the advertising
+    consent form has been shown, because the two are unrelated — that form governs advertising
+    and nothing else. We treat this as part of providing the achievements the app offers rather
+    than as advertising storage, and signing out of Play Games is what prevents it.</p>
 
     <h3>What we send Google</h3>
     <p>When you are signed in to Play Games, and only then, the app reports:</p>
     <ul>
       <li><strong>Achievement unlocks</strong> — the four survival milestones, awarded from your
       best run on the device. Casual runs count; you do not need an account.</li>
-      <li><strong>A record of each finished run</strong> — how long you survived (in milliseconds
-      and in seconds), how much fruit you hit, how much escaped, the top speed you reached, and
-      whether the run was ranked.</li>
+      <li><strong>A record of every run that ends</strong> — how long you survived (in
+      milliseconds and in seconds), how much fruit you hit, how much escaped, the top speed you
+      reached, and whether the run was ranked. Including a run you back out of before it starts,
+      which reports as a zero.</li>
       <li><strong>Your best run so far</strong>, re-sent each time the app comes to the
       foreground and after a Play Games sign-in, so a profile is not left showing less than you
       have actually done — including runs you played before you were signed in.</li>
@@ -365,6 +373,10 @@
       Deleting a Whaaack! account created <em>from</em> Play Games also does not sign you out of
       Play Games; if you later sign in again the same way, a fresh account is created, because
       the player ID is the only thing that identified the old one and we no longer hold it.</p>
+      <p>Deleting a Whaaack! account also does not stop the reporting described in
+      <a href="#playgames">section 4</a>: for as long as the device stays signed in to Play
+      Games, runs and achievements keep going to your Play Games profile, because that has never
+      depended on having an account with us. Signing out of Play Games is what ends it.</p>
     </div>
     <p>If you cannot get into the app — you lost the device, or you already uninstalled it —
     use the <a href="/whaaack/delete-account/">out-of-app deletion page</a>. It covers Play

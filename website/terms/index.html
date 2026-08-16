@@ -69,19 +69,22 @@
 
     <h2 id="service">2. What the service is</h2>
     <p>Whaaack! is a single-player arcade game. It is free to download and free to play in full.
-    Three optional extras exist:</p>
+    Two things are genuinely optional:</p>
     <ul>
       <li>an <strong>account</strong>, which is required only to place scores on the public
-      leaderboard;</li>
-      <li><strong>Google Play Games</strong>, which adds achievements and profile statistics, and
-      which can also stand in for an account — see <a href="#account">section 3</a>; and</li>
+      leaderboard — and which you can create from Play Games instead of an email address, see
+      <a href="#account">section 3</a>; and</li>
       <li>a one-time <strong>ad-free purchase</strong>, which removes advertising.</li>
     </ul>
-    <p>None is required to play, and nothing about the gameplay is locked behind any of them.
-    Play Games in particular is not ours: your device signs in to it by itself if it has a
-    profile, achievements are unlocked from casual play as readily as ranked, and signing out of
-    Play Games switches all of that off without affecting the game. What it sends to Google is
-    set out in the <a href="/whaaack/privacy/#playgames">privacy policy</a>.</p>
+    <p>Neither is required to play, and nothing about the gameplay is locked behind either.</p>
+    <p><strong>Google Play Games is a third thing, and it is not opt-in.</strong> If your device
+    already has a Play Games profile, the app connects to it when it starts — before you have
+    tapped anything — and from then on it unlocks achievements and reports your runs to Google,
+    casual runs included, whether or not you have a Whaaack! account. That is how Play Games
+    version 2 is built: there is no in-app switch, because none of it is ours to hold. Turning it
+    off means signing out of Play Games, in the Play Games app or your Google account settings,
+    after which the app sends nothing and the game plays exactly as before. Exactly what is sent
+    is set out in the <a href="/whaaack/privacy/#playgames">privacy policy</a>.</p>
 
     <h2 id="account">3. Your account</h2>
     <p>There are three ways to have one, and they differ in what you give us:</p>
@@ -91,9 +94,13 @@
       <li><strong>Google</strong> — Google confirms who you are and we receive your address and
       name. There is no separate password.</li>
       <li><strong>Play Games</strong> — your Google Play Games profile identifies the account.
-      There is <em>no email address and no password</em>: signing in with Play Games again is the
-      only way in, on any device. Your Play Games gamer tag becomes your starting display name on
-      the public leaderboard, and you can change it afterwards like anyone else.</li>
+      It has <em>no mailbox and no password</em>: internally it is keyed to an address derived
+      from your Play Games player ID, at a domain that cannot receive mail, so there is nothing
+      to send a reset to. Signing in with Play Games again is the only way in — on any device,
+      which is also what makes it portable. Your Play Games gamer tag becomes your starting
+      display name on the public leaderboard, and you can change it afterwards like anyone else.
+      <strong>Signing out of Play Games therefore locks you out of this account</strong>, since
+      the profile is the only credential; signing back in restores it.</li>
     </ul>
     <p>Whichever you use:</p>
     <ul>
@@ -105,14 +112,18 @@
       <li>Your <strong>display name is public</strong>. It must be 2 to 24 characters long, made
       only of unaccented letters a–z, digits, spaces, dots, underscores and hyphens, and it must
       start and end with a letter or a digit. It must also be unique, ignoring capitalisation.
-      Where the name comes from your Play Games gamer tag, we adjust it automatically to fit
-      those rules — trimming what they do not allow, and adding a number if the name is already
-      taken — so the name on the board may differ from your gamer tag. Beyond that it must not be
+      Where the name is not one you typed — a Play Games gamer tag, or the name on a Google
+      account — we fit it to those rules automatically: characters they do not allow are dropped,
+      anything longer than 24 is cut, a number is added if the name is already taken, and if too
+      little usable text survives we assign a neutral generated name instead. So the name on the
+      board may differ from your gamer tag, and you are free to change it. Beyond that it must not be
       offensive, impersonate anyone, contain contact details or advertising, or infringe anyone's
       rights. We may replace a name that breaks the last rule with a neutral one — every account
       has to have a name, so there is nothing to delete — and we will tell you why. To report
       someone else's name, use the <a href="/whaaack/contact/">contact form</a>.</li>
-      <li>You may change your display name once every 30 days.</li>
+      <li>You may change your display name once every 30 days. The first change is always
+      available — the clock starts at your first rename, not at sign-up — which matters if the
+      name you were given was derived rather than chosen.</li>
       <li>If you are under 16, do not create an account without a parent or guardian's agreement.
       Casual play requires no account.</li>
       <li>You can delete your account at any time — see <a href="#termination">section 10</a>.</li>
@@ -184,8 +195,11 @@
     personal, non-exclusive, non-transferable, revocable licence to use the app on devices you
     control, for your own non-commercial enjoyment. You may not redistribute, resell, decompile
     (beyond what law permits), or use the assets in your own products without written permission.</p>
-    <p>By submitting a score and a display name you allow us to publish that display name and
-    score on the leaderboards inside the app, for as long as you keep the account.</p>
+    <p>By placing a run on the leaderboard you allow us to publish your display name and that
+    score on the leaderboards inside the app, for as long as you keep the account. This covers a
+    display name you never typed — one derived from a Play Games gamer tag or a Google account
+    name — which is published on the same terms, and which you can change in <em>Settings</em>
+    if you would rather appear under something else.</p>
 
     <h2 id="availability">8. Availability, and changes</h2>
     <p>The game is provided as it is. We do not promise it will be uninterrupted or error-free,
