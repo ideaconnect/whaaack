@@ -81,13 +81,19 @@
     to remember and nothing to recover. Then <em>Settings → Delete my account</em>. That works
     precisely because holding the Play Games profile is the only real proof of ownership, and
     signing in demonstrates it.</p>
-    <p>If that is genuinely impossible — the profile itself is gone, say — write to us anyway
-    through the <a href="/whaaack/contact/">contact form</a>, tell us the display name and
-    explain the situation. We will ask for whatever we reasonably can to satisfy ourselves it is
-    you, as Art. 12(6) GDPR allows, and if we honestly cannot tell you apart from anyone else
-    quoting a public leaderboard row, we will say so rather than delete a stranger's scores. The
-    law recognises this case: under Art. 11(2) GDPR a controller who cannot identify the data
-    subject is not obliged to guess, and you may supply anything further that would settle it.</p>
+    <p>If that is genuinely impossible, there is still one thing we <em>can</em> check. The
+    account is keyed to your <strong>Play Games player ID</strong> — a long number Google issues
+    for this game. It is not on the leaderboard and we publish it nowhere, so someone who can
+    quote it has access to the Play Games profile the account belongs to. You can get it from
+    Google, not from us: <a href="https://takeout.google.com" rel="noopener">Google Takeout</a>
+    exports your Play Games data, and the Play Games profile screen shows it too. Send it through
+    the <a href="/whaaack/contact/">contact form</a> with your display name and we will match it
+    against the account and delete it.</p>
+    <p>If you cannot produce that either, write to us anyway and explain — we will ask for
+    whatever else might settle it, as Art. 12(6) GDPR allows. But we will not delete an account
+    on the strength of a leaderboard row anyone can read, and where we genuinely cannot tell you
+    from anyone else we will say so: under Art. 11(2) GDPR a controller who cannot identify the
+    data subject is not required to guess.</p>
 
     <h2>What gets deleted</h2>
     <div class="callout danger">
@@ -107,8 +113,14 @@
     <p>Two things outlive the deletion. Encrypted backups hold traces until the backup they sit in
     rotates out, and are only ever opened to restore the service after a failure. Our backend also
     keeps a sign-in log — the address used and the IP it came from — which is security record
-    keeping rather than account data, and is not linked back to a profile that no longer
-    exists.</p>
+    keeping rather than account data, and points at no profile once the profile is gone.</p>
+    <p>One honest caveat for <strong>Play Games accounts</strong>: the address on such an account
+    is derived from your Play Games player ID and contains it, so while an ordinary sign-in log
+    entry is left pointing at nothing in particular, one of these still carries that identifier
+    until the entry ages out. We would rather say so than claim a clean break we do not have. It
+    is used for nothing but security record keeping, and creating a fresh account by signing in
+    with Play Games again does not resurrect anything: the old scores and profile are gone for
+    good.</p>
 
     <h2>What is not affected</h2>
     <ul>
