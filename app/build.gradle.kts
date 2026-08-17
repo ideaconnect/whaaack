@@ -2,7 +2,8 @@ import java.util.Properties
 
 plugins {
     alias(libs.plugins.android.application)
-    alias(libs.plugins.kotlin.android)
+    // No kotlin-android: AGP 9 has built-in Kotlin support and applies it by default. The Compose
+    // and serialization compiler plugins are separate and still applied here.
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.kotlin.serialization)
 }
@@ -210,11 +211,9 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
-    kotlin {
-        compilerOptions {
-            jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
-        }
-    }
+    // No jvmTarget here any more: under AGP 9's built-in Kotlin it defaults to
+    // compileOptions.targetCompatibility, which is the 17 declared just above. Setting it in two
+    // places is how the two drift apart.
 
     buildFeatures {
         compose = true

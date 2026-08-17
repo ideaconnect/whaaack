@@ -70,8 +70,23 @@ class GameSurfaceView @JvmOverloads constructor(
     @Volatile
     private var thread: RenderThread? = null
 
+    /**
+     * The window insets the layout has to stay clear of, on all four sides.
+     *
+     * Left and right are not decoration: with the portrait lock gone the surface is laid out in
+     * landscape too, where the navigation bar and the display cutout are on the *sides* — and the
+     * cutout is the reason the union includes displayCutout() rather than only systemBars(). In
+     * portrait the cutout hides inside the status bar and contributes nothing, which is why the
+     * omission cost nothing until now.
+     */
+    @Volatile
+    private var leftInset = 0f
+
     @Volatile
     private var topInset = 0f
+
+    @Volatile
+    private var rightInset = 0f
 
     @Volatile
     private var bottomInset = 0f
@@ -114,9 +129,7 @@ class GameSurfaceView @JvmOverloads constructor(
         holder.setFormat(android.graphics.PixelFormat.OPAQUE)
 
         ViewCompat.setOnApplyWindowInsetsListener(this) { _, insets ->
-            val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
-            topInset = bars.top.toFloat()
-            bottomInset = bars.bottom.toFloat()
+            applyInsets(insets)
             thread?.invalidateLayout()
             insets
         }
@@ -302,11 +315,17 @@ class GameSurfaceView @JvmOverloads constructor(
     }
 
     private fun readRootInsets() {
-        val bars = ViewCompat.getRootWindowInsets(this)
-            ?.getInsets(WindowInsetsCompat.Type.systemBars())
-            ?: return
-        topInset = bars.top.toFloat()
-        bottomInset = bars.bottom.toFloat()
+        applyInsets(ViewCompat.getRootWindowInsets(this) ?: return)
+    }
+
+    private fun applyInsets(insets: WindowInsetsCompat) {
+        val safe = insets.getInsets(
+            WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout(),
+        )
+        leftInset = safe.left.toFloat()
+        topInset = safe.top.toFloat()
+        rightInset = safe.right.toFloat()
+        bottomInset = safe.bottom.toFloat()
     }
 
     private inner class RenderThread(
@@ -393,7 +412,13 @@ class GameSurfaceView @JvmOverloads constructor(
                     layoutDirty = false
                     if (appliedWidth > 0 && appliedHeight > 0) {
                         renderer.onSurfaceChanged(
-                            appliedWidth, appliedHeight, topInset, bottomInset, sheet,
+                            appliedWidth,
+                            appliedHeight,
+                            leftInset,
+                            topInset,
+                            rightInset,
+                            bottomInset,
+                            sheet,
                         )
                     }
                 }
@@ -410,9 +435,13 @@ class GameSurfaceView @JvmOverloads constructor(
                 // renderer already declines to draw one; without this the clock and the
                 // strikes would carry on behind it, so a player who dragged the game into a
                 // split-screen pane would come back to a run they had already lost. Pause
-                // the clock instead and let surfaceChanged bring it back. (The manifest
-                // declares resizeableActivity="false", so this should be unreachable — but
-                // free-form and desktop windowing do not always honour that.)
+                // the clock instead and let surfaceChanged bring it back.
+                //
+                // The manifest declares resizeableActivity="false" and locks to portrait, so this
+                // should be unreachable — but free-form and desktop windowing do not always honour
+                // that, which is why the renderer sizes the board from whatever window it is given
+                // and tries both HUD arrangements and a compacted score card before giving up (see
+                // GameRenderer.onSurfaceChanged). This is the floor, not the first response.
                 if (!renderer.boardDrawable) {
                     engine.pause(System.nanoTime())
                     // No frames are drawn while the window is unplayable, so the frame

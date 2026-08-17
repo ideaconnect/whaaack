@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.displayCutoutPadding
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -21,7 +22,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -61,10 +64,22 @@ fun HomeScreen(
     onLogout: () -> Unit,
     onRemoveAds: () -> Unit,
 ) {
+    // Home is a hero, an account card, two buttons, a chip row and sometimes an upsell. Standing
+    // them in a Column that fills the screen is right until the screen is a landscape phone — about
+    // 360dp tall — where a Column that cannot scroll does not shrink, it clips, and what gets
+    // clipped is the bottom: the buttons.
+    //
+    // Below the threshold the screen scrolls instead, and the hero gives up its weight: a weighted
+    // child cannot be measured inside a scrolling parent, which hands its children an infinite
+    // height (the same reason the reset form scrolls on its inner branch, see ForgotPasswordScreen).
+    val short = isShortScreen()
     Column(
         Modifier
             .fillMaxSize()
             .systemBarsPadding()
+            .displayCutoutPadding()
+            .then(if (short) Modifier.verticalScroll(rememberScrollState()) else Modifier)
+            .menuColumnWidth()
             .padding(horizontal = 22.dp, vertical = 18.dp),
     ) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
@@ -72,14 +87,15 @@ fun HomeScreen(
         }
 
         Column(
-            Modifier.weight(1f).fillMaxWidth(),
+            if (short) Modifier.fillMaxWidth() else Modifier.weight(1f).fillMaxWidth(),
             verticalArrangement = Arrangement.Center,
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
+            if (short) Spacer(Modifier.height(10.dp))
             Text(
                 "Whaaack!",
                 color = Cream,
-                fontSize = 62.sp,
+                fontSize = if (short) 44.sp else 62.sp,
                 fontWeight = FontWeight.Black,
             )
             Spacer(Modifier.height(12.dp))

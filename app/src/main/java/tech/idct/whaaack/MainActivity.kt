@@ -1,18 +1,19 @@
 package tech.idct.whaaack
 
 import android.content.Intent
+import android.os.Build
 import android.os.Bundle
 import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.PredictiveBackHandler
 import androidx.activity.compose.setContent
-import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.displayCutoutPadding
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -37,6 +38,7 @@ import androidx.credentials.exceptions.GetCredentialCancellationException
 import androidx.credentials.exceptions.GetCredentialException
 import androidx.credentials.exceptions.NoCredentialException
 import androidx.core.net.toUri
+import androidx.core.view.WindowCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
 import com.google.android.libraries.identity.googleid.GetGoogleIdOption
@@ -58,6 +60,7 @@ import tech.idct.whaaack.ui.PRIVACY_URL
 import tech.idct.whaaack.ui.RankedInviteDialog
 import tech.idct.whaaack.ui.SettingsScreen
 import tech.idct.whaaack.ui.TERMS_URL
+import tech.idct.whaaack.ui.menuColumnWidth
 import tech.idct.whaaack.ui.theme.Cream
 import tech.idct.whaaack.ui.theme.WhaaackTheme
 import java.security.MessageDigest
@@ -74,7 +77,7 @@ class MainActivity : ComponentActivity() {
     private var deepLinkHandled = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        enableEdgeToEdge()
+        applyEdgeToEdge()
         super.onCreate(savedInstanceState)
 
         // GDPR consent has to be resolved before the Ads SDK may request anything.
@@ -96,6 +99,40 @@ class MainActivity : ComponentActivity() {
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
         outState.putBoolean(KEY_DEEP_LINK_HANDLED, deepLinkHandled)
+    }
+
+    /**
+     * Edge-to-edge, without the window APIs Android 15 deprecated.
+     *
+     * androidx's `enableEdgeToEdge()` used to do this, and Play Console flagged it for three
+     * deprecated usages: its per-API implementations assign `Window.setStatusBarColor` and
+     * `setNavigationBarColor`, and set `LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES`. Upgrading the
+     * library does not help — even the newest `EdgeToEdgeApi35` still assigns both colours under a
+     * `@Suppress("DEPRECATION")` — and neither would a version guard around the call, because the
+     * Console reads the DEX and those classes ship whether or not the branch that uses them can
+     * run. The call site had to go so R8 could strip them.
+     *
+     * What replaces it is less work than the library was doing:
+     *  - From API 35 the window is edge-to-edge by force. Bar colours are ignored, every cutout
+     *    mode is interpreted as ALWAYS, and `windowOptOutEdgeToEdgeEnforcement` is disabled for
+     *    apps targeting 36 — which this one does. There is nothing left to ask for.
+     *  - Below 35 the window still has to be told not to inset its content for the system bars.
+     *    Transparency and the cutout mode come from the theme instead of from here —
+     *    `android:statusBarColor`, `android:navigationBarColor`, and `values-v27`'s
+     *    `windowLayoutInDisplayCutoutMode` — because a theme attribute is not a DEX reference and
+     *    is what the platform ignores by itself once it stops honouring them.
+     *
+     * Bar icon appearance is set on every level rather than left to `windowLightStatusBar`: it
+     * covers the navigation bar too, and it is not deprecated on any of them.
+     */
+    private fun applyEdgeToEdge() {
+        if (Build.VERSION.SDK_INT < 35) {
+            WindowCompat.setDecorFitsSystemWindows(window, false)
+        }
+        WindowCompat.getInsetsController(window, window.decorView).apply {
+            isAppearanceLightStatusBars = false
+            isAppearanceLightNavigationBars = false
+        }
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -390,6 +427,8 @@ private fun androidx.compose.foundation.layout.BoxScope.Toast(
             Modifier
                 .fillMaxWidth()
                 .systemBarsPadding()
+                .displayCutoutPadding()
+                .menuColumnWidth()
                 .padding(16.dp)
                 .clip(RoundedCornerShape(18.dp))
                 .background(Color(0xEB091428))

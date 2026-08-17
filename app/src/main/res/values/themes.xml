@@ -1,11 +1,22 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- The window background matches the orchard night sky so the very first frame
-         (drawn before the SurfaceView has a surface) does not flash white. -->
-    <style name="Theme.Whaaack" parent="android:Theme.Material.NoActionBar">
+    <!-- Split into a Base style plus a per-API override because resource qualification replaces a
+         style wholesale rather than merging item by item: values-v27/themes.xml adds the cutout
+         mode by inheriting this, instead of restating every line below. -->
+    <style name="Theme.Whaaack.Base" parent="android:Theme.Material.NoActionBar">
+        <!-- The window background matches the orchard night sky so the very first frame
+             (drawn before the SurfaceView has a surface) does not flash white. -->
         <item name="android:windowBackground">@color/orchard_night</item>
+        <!-- Transparent bars, declared here rather than set from code. Below API 35 these are how
+             an edge-to-edge window stops the platform painting its own colour behind the bars;
+             from 35 they are ignored, because the window is edge-to-edge by force. Keeping them in
+             the theme is deliberate: the equivalent Window.setStatusBarColor /
+             setNavigationBarColor calls are what Play Console flags, and a theme attribute is not
+             a DEX reference. See MainActivity.applyEdgeToEdge. -->
         <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:navigationBarColor">@android:color/transparent</item>
         <item name="android:windowLightStatusBar">false</item>
     </style>
+
+    <style name="Theme.Whaaack" parent="Theme.Whaaack.Base" />
 </resources>

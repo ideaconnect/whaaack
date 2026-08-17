@@ -7,13 +7,16 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.displayCutoutPadding
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBarsPadding
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -40,14 +43,21 @@ fun GameOverScreen(
     onHome: () -> Unit,
     onSignIn: () -> Unit,
 ) {
+    // Same bargain as Home: the headline, the score card, a rank or casual note and two buttons do
+    // not fit a landscape phone, so below the threshold this scrolls, the centring weight goes (it
+    // cannot be measured inside a scrolling parent), and the two display numbers come down a size.
+    val short = isShortScreen()
     Column(
         Modifier
             .fillMaxSize()
             .systemBarsPadding()
+            .displayCutoutPadding()
+            .then(if (short) Modifier.verticalScroll(rememberScrollState()) else Modifier)
+            .menuColumnWidth()
             .padding(horizontal = 22.dp, vertical = 20.dp),
     ) {
         Column(
-            Modifier.weight(1f).fillMaxWidth(),
+            if (short) Modifier.fillMaxWidth() else Modifier.weight(1f).fillMaxWidth(),
             verticalArrangement = Arrangement.Center,
         ) {
             Text(
@@ -55,7 +65,7 @@ fun GameOverScreen(
                 // three fruit had escaped.
                 if (run.quit) "Run ended." else "Three escaped.",
                 color = Cream,
-                fontSize = 40.sp,
+                fontSize = if (short) 30.sp else 40.sp,
                 fontWeight = FontWeight.Black,
                 textAlign = TextAlign.Center,
                 modifier = Modifier.fillMaxWidth(),
@@ -82,7 +92,7 @@ fun GameOverScreen(
                 Text(
                     LeaderboardRepository.formatScore(run.millis),
                     color = AccentLight,
-                    fontSize = 60.sp,
+                    fontSize = if (short) 44.sp else 60.sp,
                     fontWeight = FontWeight.Black,
                 )
                 Spacer(Modifier.height(10.dp))

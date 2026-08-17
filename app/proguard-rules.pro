@@ -23,6 +23,23 @@
 }
 -keep,includedescriptorclasses class tech.idct.whaaack.**$$serializer { *; }
 
+# Room instantiates its generated `*_Impl` database by reflection, and the rule it needs is not the
+# one it ships. room-runtime 2.2.5 — pulled in transitively by androidx.work 2.7.0, which arrives
+# under Play Billing / Play services; nothing in this app uses either directly — carries only
+# `-keep class * extends androidx.room.RoomDatabase`, with no member specification. AGP 9 turns on
+# `android.r8.strictFullModeForKeepRules`, under which that keeps the class and *not* its
+# constructor, so `newInstance()` fails and WorkManager's initializer takes the process down at
+# startup:
+#
+#   Unable to get provider androidx.startup.InitializationProvider
+#     Caused by: Failed to create an instance of androidx.work.impl.WorkDatabase
+#
+# Release-only, launch-immediate, and invisible to every debug build — this cost a release-build
+# smoke test to find. The rule below is the one Room itself ships from 2.3 onwards.
+-keep class * extends androidx.room.RoomDatabase {
+    <init>();
+}
+
 # OkHttp ships optional Conscrypt/BouncyCastle hooks that are absent at runtime.
 -dontwarn okhttp3.internal.platform.**
 -dontwarn org.conscrypt.**

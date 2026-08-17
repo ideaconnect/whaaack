@@ -3,10 +3,14 @@ package tech.idct.whaaack.ui
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.displayCutoutPadding
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -60,80 +64,93 @@ fun RankedInviteDialog(
         onDismissRequest = { if (!working) onDecline() },
         properties = DialogProperties(usePlatformDefaultWidth = false),
     ) {
-        Column(
+        // Filled to the dialog window and centred inside it, so the panel below is measured
+        // against the height that actually exists. Without this the panel is measured unbounded:
+        // in landscape it grew past the bottom of the screen and took Continue with it, and the
+        // scroll it carries for large font scales had nothing to scroll against.
+        Box(
             Modifier
-                .widthIn(max = 400.dp)
-                .padding(horizontal = 20.dp)
-                .clip(RoundedCornerShape(28.dp))
-                .background(Color(0xF7091428))
-                .border(1.dp, Hairline, RoundedCornerShape(28.dp))
-                // Same reasoning as the ad break: a dialog cannot outgrow the window, and at a
-                // large font scale the buttons would otherwise be cut off the bottom.
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 18.dp, vertical = 24.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
+                .fillMaxSize()
+                .systemBarsPadding()
+                .displayCutoutPadding()
+                .padding(vertical = 16.dp),
+            contentAlignment = Alignment.Center,
         ) {
-            Text(
-                "Play ranked with Play Games",
-                color = Cream,
-                fontSize = 22.sp,
-                fontWeight = FontWeight.Black,
-                textAlign = TextAlign.Center,
-            )
-
-            Text(
-                // Names the visible consequence first, and does not promise a specific name:
-                // the display name is derived from the Play Games profile server-side and
-                // de-duplicated against the board, so it can differ from their gamer tag.
-                "Ranked runs go on the public leaderboard, where your Play Games name and " +
-                    "your best time can be seen by other players.\n\n" +
-                    "We'll set up your Whaaack! account from Play Games — there's nothing to " +
-                    "fill in. You can rename yourself or delete the account in Settings at " +
-                    "any time.",
-                color = Color(0xC7FFF3E6),
-                fontSize = 13.sp,
-                lineHeight = 19.sp,
-                textAlign = TextAlign.Center,
-                modifier = Modifier.padding(top = 12.dp, bottom = 20.dp),
-            )
-
             Column(
-                Modifier.fillMaxWidth(),
+                Modifier
+                    .widthIn(max = 400.dp)
+                    .padding(horizontal = 20.dp)
+                    .clip(RoundedCornerShape(28.dp))
+                    .background(Color(0xF7091428))
+                    .border(1.dp, Hairline, RoundedCornerShape(28.dp))
+                    // Same reasoning as the ad break: a dialog cannot outgrow the window, and at a
+                    // large font scale the buttons would otherwise be cut off the bottom.
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = 18.dp, vertical = 24.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                PrimaryButton(
-                    if (working) "Setting up…" else "Play ranked",
-                    height = 56,
-                    // Both halves matter: the button must not fire twice, and the label has to
-                    // change, because two networks in sequence can take a few seconds and a
-                    // still button under an unchanged label reads as one that missed the tap.
-                    enabled = !working,
-                    onClick = onAccept,
+                Text(
+                    "Play ranked with Play Games",
+                    color = Cream,
+                    fontSize = 22.sp,
+                    fontWeight = FontWeight.Black,
+                    textAlign = TextAlign.Center,
                 )
-                if (!working) {
-                    SecondaryButton("Not now", height = 48, onClick = onDecline)
-                    Text(
-                        "Playing for fun needs no account, and stays off the board.",
-                        color = Color(0x73FFF3E6),
-                        fontSize = 11.sp,
-                        textAlign = TextAlign.Center,
+
+                Text(
+                    // Names the visible consequence first, and does not promise a specific name:
+                    // the display name is derived from the Play Games profile server-side and
+                    // de-duplicated against the board, so it can differ from their gamer tag.
+                    "Ranked runs go on the public leaderboard, where your Play Games name and " +
+                        "your best time can be seen by other players.\n\n" +
+                        "We'll set up your Whaaack! account from Play Games — there's nothing to " +
+                        "fill in. You can rename yourself or delete the account in Settings at " +
+                        "any time.",
+                    color = Color(0xC7FFF3E6),
+                    fontSize = 13.sp,
+                    lineHeight = 19.sp,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.padding(top = 12.dp, bottom = 20.dp),
+                )
+
+                Column(
+                    Modifier.fillMaxWidth(),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    PrimaryButton(
+                        if (working) "Setting up…" else "Play ranked",
+                        height = 56,
+                        // Both halves matter: the button must not fire twice, and the label has to
+                        // change, because two networks in sequence can take a few seconds and a
+                        // still button under an unchanged label reads as one that missed the tap.
+                        enabled = !working,
+                        onClick = onAccept,
                     )
-                    // This dialog creates a real account from one tap, which makes it the
-                    // moment the terms are accepted and the privacy policy becomes relevant.
-                    // Everywhere else those live behind Settings → About; a player who reaches
-                    // an account this way might never have opened that screen, so both are put
-                    // within reach of the button that does it.
-                    Text(
-                        "By continuing you accept the terms and the privacy policy.",
-                        color = Color(0x73FFF3E6),
-                        fontSize = 11.sp,
-                        textAlign = TextAlign.Center,
-                        modifier = Modifier.padding(top = 2.dp),
-                    )
-                    Row(horizontalArrangement = Arrangement.spacedBy(18.dp)) {
-                        LinkText("Terms", onTerms)
-                        LinkText("Privacy policy", onPrivacy)
+                    if (!working) {
+                        SecondaryButton("Not now", height = 48, onClick = onDecline)
+                        Text(
+                            "Playing for fun needs no account, and stays off the board.",
+                            color = Color(0x73FFF3E6),
+                            fontSize = 11.sp,
+                            textAlign = TextAlign.Center,
+                        )
+                        // This dialog creates a real account from one tap, which makes it the
+                        // moment the terms are accepted and the privacy policy becomes relevant.
+                        // Everywhere else those live behind Settings → About; a player who reaches
+                        // an account this way might never have opened that screen, so both are put
+                        // within reach of the button that does it.
+                        Text(
+                            "By continuing you accept the terms and the privacy policy.",
+                            color = Color(0x73FFF3E6),
+                            fontSize = 11.sp,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.padding(top = 2.dp),
+                        )
+                        Row(horizontalArrangement = Arrangement.spacedBy(18.dp)) {
+                            LinkText("Terms", onTerms)
+                            LinkText("Privacy policy", onPrivacy)
+                        }
                     }
                 }
             }

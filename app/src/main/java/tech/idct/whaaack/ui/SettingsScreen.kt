@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.displayCutoutPadding
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -72,6 +73,8 @@ fun SettingsScreen(
             Modifier
                 .fillMaxSize()
                 .systemBarsPadding()
+                .displayCutoutPadding()
+                .menuColumnWidth()
                 .padding(horizontal = 20.dp, vertical = 18.dp),
         ) {
             ScreenHeader("Settings", onBack)
@@ -553,6 +556,8 @@ private fun SheetScaffold(
                 // Swallow clicks so tapping the sheet does not dismiss it.
                 .clickableOnce(true) {}
                 .systemBarsPadding()
+                .displayCutoutPadding()
+                .menuColumnWidth()
                 .padding(horizontal = 20.dp, vertical = 18.dp),
         ) {
             Box(

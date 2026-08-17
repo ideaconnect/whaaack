@@ -45,6 +45,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
@@ -54,11 +55,14 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.Constraints
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
@@ -74,9 +78,56 @@ import tech.idct.whaaack.ui.theme.DangerSoft
 import tech.idct.whaaack.ui.theme.Hairline
 import tech.idct.whaaack.ui.theme.PanelNavy
 import kotlin.math.ceil
+import kotlin.math.min
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
+
+/**
+ * True when the window is too short to stand a full-height menu screen in.
+ *
+ * A landscape phone is about 360dp tall and a half-height split-screen pane less than that, against
+ * roughly 560dp of content on Home and Game over. The screens that cannot shrink respond by
+ * scrolling and by trimming their display type; the ones that already scroll do not ask.
+ *
+ * Read from the configuration rather than measured with BoxWithConstraints so it can be used
+ * without wrapping every screen in another layout node. The activity handles its own configuration
+ * changes, and Compose still republishes the configuration on each of them, so this follows a
+ * rotation or a resize without the activity being recreated.
+ */
+@Composable
+fun isShortScreen(): Boolean = LocalConfiguration.current.screenHeightDp < 560
+
+/**
+ * Caps a menu screen at a readable column width and centres it in the window.
+ *
+ * Every menu is one column of headings, rows and full-width buttons, which is exactly right on a
+ * phone and wrong on a tablet: `fillMaxWidth()` on a 10" screen stretches a two-word button across
+ * 1200dp and puts the settings toggles a hand's width from their labels. 560dp is about as wide as
+ * that column reads well, and roughly the width these screens were designed at.
+ *
+ * A layout modifier rather than a wrapping Box so it can be dropped into an existing chain: the
+ * content is measured at no more than [max] wide and placed centred in whatever width the screen
+ * was given, which is also what keeps it centred when a side navigation bar has already been padded
+ * away asymmetrically.
+ */
+fun Modifier.menuColumnWidth(max: Dp = 560.dp): Modifier = layout { measurable, constraints ->
+    val available = constraints.maxWidth
+    // An unbounded width means something already made this scrollable sideways; there is nothing
+    // to centre in, so measure as asked and get out of the way.
+    if (available == Constraints.Infinity) {
+        val placeable = measurable.measure(constraints)
+        layout(placeable.width, placeable.height) { placeable.place(0, 0) }
+    } else {
+        val width = min(available, max.roundToPx())
+        val placeable = measurable.measure(
+            constraints.copy(minWidth = min(constraints.minWidth, width), maxWidth = width),
+        )
+        layout(available, placeable.height) {
+            placeable.place((available - placeable.width) / 2, 0)
+        }
+    }
+}
 
 /**
  * The parallax orchard behind every menu screen.

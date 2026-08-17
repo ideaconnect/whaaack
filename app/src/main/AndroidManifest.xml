@@ -11,9 +11,10 @@
     <!-- android:appCategory="game" is load-bearing, not metadata. Android 16 ignores
          screenOrientation, resizeableActivity and aspect-ratio restrictions for apps
          targeting API 36 on displays with a smallest width of 600dp or more — every tablet,
-         unfolded foldable and desktop-windowed session. Games are exempt from that change,
-         but only when they declare themselves one here. Without it the portrait lock below
-         is silently dropped on exactly the devices whose layout has never been tested. -->
+         unfolded foldable and desktop-windowed session — and Android 17 removes even the
+         temporary per-activity opt-out. Games are exempt from both, but only when they declare
+         themselves one here. Without it the portrait lock below is silently dropped on exactly
+         the devices whose layout has never been tested. -->
     <application
         android:name=".WhaaackApp"
         android:allowBackup="true"
@@ -56,14 +57,19 @@
             android:name="com.google.android.gms.ads.flag.OPTIMIZE_AD_LOADING"
             android:value="true" />
 
-        <!-- resizeableActivity="false": a run is a reflex test on a fixed 4x4 board, and the
-             board is derived from the height left between the score card and the End-run
-             pill. Below roughly 280dp of usable height that arithmetic leaves no room, the
-             renderer correctly declines to draw a zero-sized board — and the clock and the
-             strikes would carry on regardless. Rather than referee a window nobody can play
-             in, decline to be put in one. The engine also pauses itself if it ever happens
-             anyway (see GameSurfaceView), because free-form and desktop windowing do not
-             always honour this.
+        <!-- screenOrientation="portrait" and resizeableActivity="false" are a product decision, not
+             an accident: Whaaack! is played in portrait with two thumbs, and it is not offered in
+             landscape. Google Play suggests removing both for large-screen support; that suggestion
+             is declined deliberately, and it costs nothing in compliance — games are an explicit
+             exception to Android 16's and Android 17's ignoring of these restrictions on displays
+             600dp and wider, which is what android:appCategory="game" above buys.
+
+             The renderer no longer depends on the lock, though. It sizes the board from whatever
+             window it is handed — stacked HUD or one beside the board, and a compacted score card
+             if that is what buys a playable board (see GameRenderer.layOut) — because free-form and
+             desktop windowing do not always honour this, and a window that is merely unusual should
+             get a playable board rather than a paused run. One too small for any arrangement still
+             pauses the run rather than letting it be lost behind an undrawable board.
 
              windowSoftInputMode="adjustResize" is for the auth forms, and only matters below
              API 30. The activity is edge-to-edge, so from API 30 the IME never resizes the

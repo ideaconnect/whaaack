@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Draws into the display cutout on API 27 to 34, replacing the
+         LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES that androidx's enableEdgeToEdge() used to set
+         from code — one of the three deprecated usages Play Console reported. From API 35 the
+         platform interprets every cutout mode as ALWAYS and this attribute stops mattering; below
+         27 it does not exist, which is what the -v27 qualifier is for (minSdk is 26).
+
+         The insets are still respected by the layout: every screen pads itself with
+         systemBarsPadding() + displayCutoutPadding(), and the game surface reads the same union.
+         Drawing into the cutout is about the orchard reaching the edge, not about controls. -->
+    <style name="Theme.Whaaack" parent="Theme.Whaaack.Base">
+        <item name="android:windowLayoutInDisplayCutoutMode">shortEdges</item>
+    </style>
+</resources>

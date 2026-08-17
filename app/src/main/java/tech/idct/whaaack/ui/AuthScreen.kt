@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.displayCutoutPadding
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -87,8 +88,10 @@ fun AuthScreen(
         Modifier
             .fillMaxSize()
             .systemBarsPadding()
+            .displayCutoutPadding()
+            .menuColumnWidth()
             // Outside the verticalScroll, so an open keyboard shrinks the scrolling viewport
-            // instead of covering it. The window is edge-to-edge (see enableEdgeToEdge in
+            // instead of covering it. The window is edge-to-edge (see applyEdgeToEdge in
             // MainActivity), so on API 30+ nothing else moves this content out from under the
             // IME — without it the Column stayed full-height, had nothing to scroll, and the
             // password field and the submit button below it were simply unreachable until the
@@ -308,6 +311,8 @@ fun ForgotPasswordScreen(
         Modifier
             .fillMaxSize()
             .systemBarsPadding()
+            .displayCutoutPadding()
+            .menuColumnWidth()
             // Same reason as the sign-in form above: edge-to-edge means the keyboard overlays
             // the window rather than resizing it, so the space left for the content has to be
             // taken here or the send button ends up behind the IME on a short screen.

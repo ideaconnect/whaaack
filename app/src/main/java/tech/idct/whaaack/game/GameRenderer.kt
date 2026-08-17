@@ -113,8 +113,18 @@ class GameRenderer(density: Float) {
 
     private var width = 0
     private var height = 0
+    private var safeLeft = 0f
     private var safeTop = 0f
+    private var safeRight = 0f
     private var safeBottom = 0f
+
+    /**
+     * Whether the HUD sits beside the board instead of above and below it, and how much of the
+     * score card's full height it was given. Both are decided by [onSurfaceChanged] and read by
+     * the draw calls, on the same thread.
+     */
+    private var sideBySideHud = false
+    private var cardScale = 1f
 
     // Board geometry, recomputed only when the surface changes size.
     private var boardLeft = 0f
@@ -122,10 +132,11 @@ class GameRenderer(density: Float) {
     private var tileSize = 0f
 
     /**
-     * False when the viewport leaves no room for a playable board — below roughly 280dp of
-     * usable height, which in practice means split-screen or a free-form window. The board
-     * already declines to draw at that point; this is what stops the run continuing to be
-     * lost behind it. See GameSurfaceView's render loop.
+     * False when no arrangement fits a playable board in the viewport — a tile under
+     * [MIN_TILE_DP], which after both HUD arrangements and a compacted score card have been tried
+     * means a genuinely tiny window: a 30/70 split-screen pane, or a free-form one dragged down to
+     * a sliver. The board already declines to draw at that point; this is what stops the run
+     * continuing to be lost behind it. See GameSurfaceView's render loop.
      */
     val boardDrawable: Boolean get() = tileSize > 0f
     private var tileGap = 0f
@@ -173,10 +184,20 @@ class GameRenderer(density: Float) {
         val delayMs: Float,
     )
 
-    fun onSurfaceChanged(w: Int, h: Int, topInset: Float, bottomInset: Float, assets: GameAssets) {
+    fun onSurfaceChanged(
+        w: Int,
+        h: Int,
+        leftInset: Float,
+        topInset: Float,
+        rightInset: Float,
+        bottomInset: Float,
+        assets: GameAssets,
+    ) {
         width = w
         height = h
+        safeLeft = leftInset
         safeTop = topInset
+        safeRight = rightInset
         safeBottom = bottomInset
 
         skyShader = BitmapShader(assets.sky, Shader.TileMode.REPEAT, Shader.TileMode.CLAMP)
@@ -198,41 +219,43 @@ class GameRenderer(density: Float) {
             Shader.TileMode.CLAMP,
         )
 
-        val sidePad = dp(16f)
-        val cardTop = safeTop + dp(14f) + dp(28f) + dp(12f)
-        cardRect.set(sidePad, cardTop, w - sidePad, cardTop + dp(104f))
+        // Four candidate layouts, scored by the tile size each yields, and the biggest tile wins.
+        //
+        // The activity asks for portrait and declares itself non-resizeable, but asking is all it
+        // can do: free-form and desktop windowing hand out the window they please, and a large
+        // font scale or a split pane can leave a portrait window shorter than the HUD assumes. So
+        // the shape of the window is measured rather than assumed. A window wider than it is tall
+        // has height for a board only if the score card and the End-run pill stop spending it, and
+        // a short one may have room only if the card gives some back. Trying both arrangements at
+        // both card sizes answers that in a dozen float operations, on a path that runs when the
+        // surface changes and never per frame.
+        //
+        // Preference order matters for the ties this deliberately does not break: the natural
+        // arrangement for the window's aspect first, and a full-size card before a compacted one,
+        // so a candidate only wins by being genuinely better.
+        val stacked = (w - leftInset - rightInset) <= (h - topInset - bottomInset)
+        var bestSideBySide = !stacked
+        var bestScale = 1f
+        var bestTile = 0f
+        for (scale in floatArrayOf(1f, COMPACT_CARD_SCALE)) {
+            for (sideBySide in booleanArrayOf(!stacked, stacked)) {
+                val tile = layOut(sideBySide, scale)
+                if (tile > bestTile + 0.5f) {
+                    bestTile = tile
+                    bestSideBySide = sideBySide
+                    bestScale = scale
+                }
+            }
+        }
+        // Re-applied because layOut writes the geometry as it measures, so the last call is the one
+        // that leaves the fields behind.
+        layOut(bestSideBySide, bestScale)
+        // A tile below this is not something a thumb can hit at four fruit and a 200 ms cycle.
+        // Reported as no board at all, which pauses the run rather than letting it be lost in a
+        // window nobody can play in.
+        if (tileSize < dp(MIN_TILE_DP)) tileSize = 0f
 
-        endRunRect.set(
-            w / 2f - dp(52f),
-            h - safeBottom - dp(18f) - dp(38f),
-            w / 2f + dp(52f),
-            h - safeBottom - dp(18f),
-        )
-
-        // The board takes the space between the score card and the End-run pill.
-        boardInset = dp(14f)
-        tileGap = dp(10f)
-        val availableTop = cardRect.bottom + dp(16f)
-        val availableBottom = endRunRect.top - dp(14f)
-        val maxBoardWidth = w - 2 * sidePad
-        val maxBoardHeight = availableBottom - availableTop
-
-        val sizeFromWidth = (maxBoardWidth - 2 * boardInset - 3 * tileGap) / 4f
-        val sizeFromHeight = (maxBoardHeight - 2 * boardInset - 3 * tileGap) / 4f
-        // Clamped: a viewport too short to hold the card, the board and the pill leaves no
-        // room at all, and a negative tile size feeds inverted rects to every draw call and
-        // an inverted destination to every drawBitmap.
-        tileSize = min(sizeFromWidth, sizeFromHeight).coerceAtLeast(0f)
-
-        val boardW = tileSize * 4 + tileGap * 3 + boardInset * 2
-        val boardH = boardW
-        val bx = (w - boardW) / 2f
-        val by = availableTop + (maxBoardHeight - boardH) / 2f
-        boardRect.set(bx, by, bx + boardW, by + boardH)
-        boardLeft = bx + boardInset
-        boardTop = by + boardInset
-
-        scoreText.textSize = dp(46f)
+        scoreText.textSize = dp(46f) * cardScale
         label.textSize = dp(11f)
         // Sized here rather than at construction for the same reason `density` is re-read
         // on every surface change: a display-size change reaches this renderer without
@@ -247,6 +270,94 @@ class GameRenderer(density: Float) {
             tileSize = tileSize,
             tileGap = tileGap,
         )
+    }
+
+    /**
+     * Places the HUD and the board for one candidate arrangement and returns the tile size it
+     * yields — 0 when it does not fit at all.
+     *
+     * Every offset is measured from the safe area rather than the window, which is what keeps the
+     * mode chip off a landscape cutout and the End-run pill above the gesture bar.
+     *
+     * Writes the geometry fields as it measures, so the winner has to be laid out last.
+     */
+    private fun layOut(sideBySide: Boolean, cardScale: Float): Float {
+        sideBySideHud = sideBySide
+        this.cardScale = cardScale
+
+        val sidePad = dp(16f)
+        val contentLeft = safeLeft + sidePad
+        val contentRight = width - safeRight - sidePad
+        // Below the top bar: its offset from the safe top, its own height, and a gap.
+        val contentTop = safeTop + dp(14f) + dp(28f) + dp(12f)
+        val contentBottom = height - safeBottom - dp(18f)
+        val cardH = dp(104f) * cardScale
+        val pillW = dp(104f)
+        val pillH = dp(38f)
+
+        boardInset = dp(14f)
+        tileGap = dp(10f)
+
+        val areaLeft: Float
+        val areaTop: Float
+        val areaRight: Float
+        val areaBottom: Float
+        if (sideBySide) {
+            // Score card and pill in a column down the left, board in everything left over. Just
+            // under a third of the width, floored so a six-digit score still reads at the size the
+            // card shrinks it to, and capped so a tablet does not spend 400dp on a card built for
+            // 260 — and so the board can usually sit on the middle of the screen rather than being
+            // pushed off it by the column (see the centring below).
+            val columnW = ((contentRight - contentLeft) * 0.30f)
+                .coerceIn(dp(160f), dp(280f))
+            cardRect.set(contentLeft, contentTop, contentLeft + columnW, contentTop + cardH)
+            val pillCx = contentLeft + columnW / 2f
+            endRunRect.set(
+                pillCx - pillW / 2f,
+                contentBottom - pillH,
+                pillCx + pillW / 2f,
+                contentBottom,
+            )
+            areaLeft = cardRect.right + dp(16f)
+            areaTop = contentTop
+            areaRight = contentRight
+            areaBottom = contentBottom
+        } else {
+            cardRect.set(contentLeft, contentTop, contentRight, contentTop + cardH)
+            val pillCx = (contentLeft + contentRight) / 2f
+            endRunRect.set(
+                pillCx - pillW / 2f,
+                contentBottom - pillH,
+                pillCx + pillW / 2f,
+                contentBottom,
+            )
+            areaLeft = contentLeft
+            areaTop = cardRect.bottom + dp(16f)
+            areaRight = contentRight
+            areaBottom = endRunRect.top - dp(14f)
+        }
+
+        // Square, as large as the free area allows, and capped: a 10" tablet would otherwise be
+        // handed 180dp tiles and turn whacking into reaching. Clamped at zero as well, because a
+        // negative tile size feeds inverted rects to every draw call and an inverted destination
+        // to every drawBitmap.
+        val span = min(areaRight - areaLeft, areaBottom - areaTop)
+        tileSize = ((span - 2 * boardInset - 3 * tileGap) / 4f)
+            .coerceAtMost(dp(MAX_TILE_DP))
+            .coerceAtLeast(0f)
+
+        val boardSide = tileSize * 4 + tileGap * 3 + boardInset * 2
+        // Centred on the window, then pushed clear of the HUD column if it has to be. Beside the
+        // HUD the board is sized by the height, so the strip left over is wider than the board is —
+        // and centring it inside that strip parks a two-thumbed game under the right hand alone.
+        // In the stacked arrangement the two agree and this is the plain centring it always was.
+        val windowCentred = contentLeft + (contentRight - contentLeft - boardSide) / 2f
+        val bx = windowCentred.coerceIn(areaLeft, max(areaLeft, areaRight - boardSide))
+        val by = areaTop + (areaBottom - areaTop - boardSide) / 2f
+        boardRect.set(bx, by, bx + boardSide, by + boardSide)
+        boardLeft = bx + boardInset
+        boardTop = by + boardInset
+        return tileSize
     }
 
     /**
@@ -351,13 +462,18 @@ class GameRenderer(density: Float) {
     private fun drawTopBar(canvas: Canvas, engine: GameEngine) {
         val y = safeTop + dp(14f)
         val chipH = dp(28f)
+        // Both ends are measured from the safe area: in landscape the navigation bar and the
+        // display cutout are on the sides, and the chip and the strike dots are the two things
+        // that sit hard against them.
+        val barLeft = safeLeft + dp(16f)
+        val barRight = width - safeRight - dp(16f)
 
         // Mode chip
         val text = if (engine.ranked) "RANKED" else "FOR FUN"
         label.textSize = dp(10f)
         label.textAlign = Paint.Align.LEFT
         val chipW = label.measureText(text) + dp(24f)
-        tmpRect.set(dp(16f), y, dp(16f) + chipW, y + chipH)
+        tmpRect.set(barLeft, y, barLeft + chipW, y + chipH)
         fill.reset()
         fill.isAntiAlias = true
         fill.color = if (engine.ranked) 0x33FFC97A else panel
@@ -369,7 +485,7 @@ class GameRenderer(density: Float) {
 
         // Strike dots, filling left to right as strikes land.
         val dot = dp(12f)
-        var cx = width - dp(16f) - dot / 2
+        var cx = barRight - dot / 2
         for (i in GameEngine.MAX_STRIKES downTo 1) {
             fill.color = if (engine.strikes >= i) strikeOn else strikeOff
             canvas.drawCircle(cx, y + chipH / 2, dot / 2, fill)
@@ -382,31 +498,45 @@ class GameRenderer(density: Float) {
     }
 
     private fun drawScoreCard(canvas: Canvas, engine: GameEngine) {
+        // Every offset inside the card is proportional to its height, so the compacted card the
+        // renderer falls back to in a short window is the same design smaller rather than the same
+        // contents overflowing. See layOut.
+        val s = cardScale
+        val corner = dp(26f) * s
+
         fill.reset()
         fill.isAntiAlias = true
         fill.color = panelStrong
-        canvas.drawRoundRect(cardRect, dp(26f), dp(26f), fill)
+        canvas.drawRoundRect(cardRect, corner, corner, fill)
         stroke.color = hairline
-        canvas.drawRoundRect(cardRect, dp(26f), dp(26f), stroke)
+        canvas.drawRoundRect(cardRect, corner, corner, stroke)
 
         // Score: milliseconds survived.
         val score = engine.elapsedMs.toString()
-        scoreText.textSize = dp(46f)
+        scoreText.textSize = dp(46f) * s
         scoreText.textAlign = Paint.Align.CENTER
-        val baseline = cardRect.top + dp(52f)
-        val scoreWidth = scoreText.measureText(score)
-        canvas.drawText(score, cardRect.centerX() - dp(11f), baseline, scoreText)
+        // Fitted to the card rather than trusted to fit it: beside the board the card is as narrow
+        // as 170dp, and a two-minute run is six digits plus the MS suffix. measureText on a
+        // six-character string is already on this path, so the fit costs one more of them.
+        val maxScoreWidth = cardRect.width() - dp(54f) * s
+        var scoreWidth = scoreText.measureText(score)
+        if (maxScoreWidth > 0f && scoreWidth > maxScoreWidth) {
+            scoreText.textSize *= maxScoreWidth / scoreWidth
+            scoreWidth = scoreText.measureText(score)
+        }
+        val baseline = cardRect.top + dp(52f) * s
+        canvas.drawText(score, cardRect.centerX() - dp(11f) * s, baseline, scoreText)
 
-        label.textSize = dp(11f)
+        label.textSize = dp(11f) * s
         label.textAlign = Paint.Align.LEFT
         label.color = 0x99FFF3E6.toInt()
-        canvas.drawText("MS", cardRect.centerX() + scoreWidth / 2 - dp(6f), baseline, label)
+        canvas.drawText("MS", cardRect.centerX() + scoreWidth / 2 - dp(6f) * s, baseline, label)
 
         // Speed bar
-        val barLeft = cardRect.left + dp(16f)
-        val barRight = cardRect.right - dp(16f)
-        val barTop = cardRect.top + dp(66f)
-        val barH = dp(6f)
+        val barLeft = cardRect.left + dp(16f) * s
+        val barRight = cardRect.right - dp(16f) * s
+        val barTop = cardRect.top + dp(66f) * s
+        val barH = dp(6f) * s
         tmpRect.set(barLeft, barTop, barRight, barTop + barH)
         fill.color = 0x66140A1A
         canvas.drawRoundRect(tmpRect, barH / 2, barH / 2, fill)
@@ -431,9 +561,9 @@ class GameRenderer(density: Float) {
         } else {
             "SPEED ${GameEngine.displaySpeed(engine.level)}"
         }
-        canvas.drawText(speed, barLeft, barTop + dp(20f), label)
+        canvas.drawText(speed, barLeft, barTop + dp(20f) * s, label)
         label.textAlign = Paint.Align.RIGHT
-        canvas.drawText("${engine.hits} HITS", barRight, barTop + dp(20f), label)
+        canvas.drawText("${engine.hits} HITS", barRight, barTop + dp(20f) * s, label)
     }
 
     /**
@@ -649,7 +779,7 @@ class GameRenderer(density: Float) {
         scoreText.textAlign = Paint.Align.CENTER
         scoreText.color = cream
         canvas.drawText(text, width / 2f, height / 2f + dp(34f), scoreText)
-        scoreText.textSize = dp(46f)
+        scoreText.textSize = dp(46f) * cardScale
     }
 
     private fun drawOutro(canvas: Canvas, engine: GameEngine, assets: GameAssets, nowNs: Long) {
@@ -720,5 +850,25 @@ class GameRenderer(density: Float) {
      */
     fun resetFrameClock() {
         lastFrameNs = 0L
+    }
+
+    private companion object {
+        /**
+         * How much of its height the score card keeps when the full-size one leaves no room for a
+         * playable board. 0.72 buys back 29dp of board — the difference between a 36dp tile and a
+         * 43dp one in a half-height split-screen pane — and is the floor at which the 11dp labels
+         * inside the card are still legible.
+         */
+        const val COMPACT_CARD_SCALE = 0.72f
+
+        /** Smallest tile worth offering, in dp. Below it the board is reported as not drawable. */
+        const val MIN_TILE_DP = 36f
+
+        /**
+         * Largest tile, in dp. A phone gets about 68dp from its width, so this lets a tablet or an
+         * unfolded foldable grow the board by a third and no further: the game is thumbs on a
+         * board, and an uncapped board on a 10" screen is 180dp tiles and a reach per fruit.
+         */
+        const val MAX_TILE_DP = 88f
     }
 }
