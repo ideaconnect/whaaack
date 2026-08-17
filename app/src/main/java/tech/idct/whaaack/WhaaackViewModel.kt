@@ -1074,6 +1074,34 @@ class WhaaackViewModel(app: Application) : AndroidViewModel(app) {
         val expiresAtMs = System.currentTimeMillis() + link.expiresInSeconds * 1000
 
         viewModelScope.launch {
+            // *That* the link was asked for, before who it belongs to.
+            //
+            // MainActivity is an exported launcher activity, so its own note says an explicit
+            // intent from another app arrives with any whaaack: URI it likes — and the check
+            // below used to be the only one: /auth/v1/user proves the tokens are somebody's
+            // live session, never that this player wanted them. A co-installed app could hand
+            // over its own valid pair and the app would adopt it silently, putting the player
+            // into an account the sender controls; every ranked run and every email or
+            // password change from that point lands there. That is session fixation, and the
+            // token being genuine is precisely why the server cannot catch it.
+            //
+            // So a callback is only believed while this device is actually waiting for one:
+            // the three flows that ask GoTrue to send a link open a window, and nothing else
+            // does. It is not a nonce — a link asked for on another device is refused here,
+            // and an attacker who lands inside a window the player opened themselves is not
+            // stopped — but it takes the attack from "any time, silently" to "only in the
+            // minutes after the player requested a link, on this device". PKCE, which binds
+            // the callback to a verifier this device generated, is the complete fix and needs
+            // the hand-rolled client to carry a code exchange; this is the part that can be
+            // held without touching the flow that emails real players their reset link.
+            if (!supabase.authCallbackExpected()) {
+                _state.update { it.copy(
+                    toast = "That link wasn't requested from this device. Ask for a new one " +
+                        "here, or open it where you requested it.",
+                ) }
+                return@launch
+            }
+
             // Who this link belongs to is settled *before* anything is written. The previous
             // order — save with an empty user id, then try to fill it in — left a session
             // behind that no later request could recover from if that second call failed:
@@ -1100,6 +1128,11 @@ class WhaaackViewModel(app: Application) : AndroidViewModel(app) {
                     provider = user["app_metadata"]?.str("provider") ?: "email",
                 ),
             )
+            // Spent. The window is for the link that was asked for, not for the rest of the
+            // two hours — and GoTrue's links are single-use, so nothing legitimate needs it
+            // again. The double-confirm email change is unaffected: its first link comes back
+            // as a Notice with no tokens and never reaches here, only the closing one does.
+            supabase.forgetAuthCallback()
             auth.restore()
             auth.refreshProfile()
             _state.update { it.copy(sessionResolved = true) }

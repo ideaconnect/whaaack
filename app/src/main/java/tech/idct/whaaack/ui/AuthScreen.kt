@@ -255,7 +255,7 @@ fun AuthScreen(
         if (signUp) {
             Spacer(Modifier.height(6.dp))
             Text(
-                "At least 8 characters, including a number.",
+                "At least 8 characters, with a letter and a number.",
                 color = Color(0x8AFFF3E6),
                 fontSize = 11.sp,
             )

@@ -80,6 +80,19 @@ interface SessionStore {
      * back to its previous value.
      */
     suspend fun saveDisplayName(name: String)
+
+    /**
+     * Records that this device has just asked GoTrue to email an auth link, and until when a
+     * `whaaack://auth` callback carrying tokens may therefore be believed. Pass 0 to forget.
+     *
+     * On disk rather than in memory because the wait is spent in another app: the player
+     * leaves for their inbox and Android is free to kill the process before they tap.
+     */
+    suspend fun expectAuthCallback(untilMs: Long)
+
+    /** The deadline set by [expectAuthCallback], or 0 if no link is outstanding. */
+    suspend fun authCallbackExpectedUntil(): Long
+
     suspend fun clear()
 }
 
@@ -93,6 +106,7 @@ class DataStoreSessionStore(private val context: Context) : SessionStore {
     private val keyEmail = stringPreferencesKey("email")
     private val keyProvider = stringPreferencesKey("provider")
     private val keyDisplayName = stringPreferencesKey("display_name")
+    private val keyCallbackUntil = longPreferencesKey("auth_callback_until")
 
     override suspend fun current(): Session? {
         val prefs = context.sessionDataStore.data.first()
@@ -129,6 +143,15 @@ class DataStoreSessionStore(private val context: Context) : SessionStore {
             if (prefs[keyAccess] != null) prefs[keyDisplayName] = name
         }
     }
+
+    override suspend fun expectAuthCallback(untilMs: Long) {
+        context.sessionDataStore.edit { prefs ->
+            if (untilMs > 0L) prefs[keyCallbackUntil] = untilMs else prefs.remove(keyCallbackUntil)
+        }
+    }
+
+    override suspend fun authCallbackExpectedUntil(): Long =
+        context.sessionDataStore.data.first()[keyCallbackUntil] ?: 0L
 
     override suspend fun clear() {
         context.sessionDataStore.edit { it.clear() }

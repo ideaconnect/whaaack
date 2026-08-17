@@ -238,6 +238,10 @@ class AuthRepository(private val client: SupabaseClient) {
         if (identities != null && identities.isEmpty()) {
             throw AuthResultException(AuthError.EmailTaken)
         }
+
+        // A confirmation link is on its way to the address this device just typed, and it
+        // comes back through the same whaaack://auth callback a recovery does.
+        client.expectAuthCallback()
     }
 
     suspend fun signInWithEmail(email: String, password: String) {
@@ -319,6 +323,9 @@ class AuthRepository(private val client: SupabaseClient) {
                 payload,
             )
         }
+        // This device asked, so a callback from this device's inbox is now believable. See
+        // WhaaackViewModel.adoptAuthLink for what the window is guarding against.
+        client.expectAuthCallback()
     }
 
     suspend fun signOut() {
@@ -383,6 +390,9 @@ class AuthRepository(private val client: SupabaseClient) {
         requireSession()
         val payload = buildJsonObject { put("email", JsonPrimitive(newEmail.trim())) }
         call { client.request("PUT", "/auth/v1/user", payload, authorized = true) }
+        // double_confirm_changes mails both addresses and both links land on whaaack://auth,
+        // so this flow opens the same window the other two do.
+        client.expectAuthCallback()
     }
 
     suspend fun updatePassword(newPassword: String) {
@@ -467,9 +477,6 @@ class AuthRepository(private val client: SupabaseClient) {
         if (!isStrongPassword(password)) throw AuthResultException(AuthError.WeakPassword)
     }
 
-    private fun isStrongPassword(password: String) =
-        password.length >= 8 && password.any { it.isDigit() }
-
     private inline fun <T> call(block: () -> T): T = try {
         block()
     } catch (e: SupabaseClient.SupabaseException) {
@@ -486,6 +493,26 @@ class AuthRepository(private val client: SupabaseClient) {
     private fun translate(e: SupabaseClient.SupabaseException): AuthError =
         translateAuthError(e.errorCode, e.message)
 }
+
+/**
+ * The client half of the password policy.
+ *
+ * The other half is `minimum_password_length = 8` and `password_requirements =
+ * "letters_digits"` in supabase/config.toml, and the two are written to agree exactly. This
+ * check standing alone is what let a direct call to /auth/v1/signup — with the publishable key
+ * that ships in the APK — create an account under GoTrue's own six-character default.
+ *
+ * The letter clause is there because of how GoTrue expresses the rule rather than because the
+ * form asks for one: `letters_digits` is its narrowest option that includes "a digit", and it
+ * requires a letter alongside. Without the clause "12345678" would pass here and be refused by
+ * the server, which is the one failure a matched pair exists to prevent.
+ *
+ * A free function for the same reason [translateAuthError] is one: [AuthRepository] needs a
+ * [SupabaseClient], which needs a DataStore, which needs Android — and this rule is exactly
+ * the kind that should be pinned by a test.
+ */
+internal fun isStrongPassword(password: String): Boolean =
+    password.length >= 8 && password.any { it.isDigit() } && password.any { it.isLetter() }
 
 /**
  * The server's answer, turned into something a player can read and act on.

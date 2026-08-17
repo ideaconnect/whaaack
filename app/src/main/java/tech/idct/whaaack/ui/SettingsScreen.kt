@@ -342,7 +342,8 @@ fun SettingsScreen(
 
             Sheet.PASSWORD -> EditSheet(
                 title = "Change password",
-                body = "Use at least 8 characters with one number. You'll stay signed in on this device.",
+                body = "Use at least 8 characters with a letter and a number. " +
+                    "You'll stay signed in on this device.",
                 fieldLabel = "New password",
                 initial = "",
                 cta = "Update password",

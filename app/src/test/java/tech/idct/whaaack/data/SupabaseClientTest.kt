@@ -5,6 +5,7 @@ import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertThrows
@@ -200,6 +201,49 @@ class SupabaseClientTest {
         assertNull(store.session)
     }
 
+    // ---- the whaaack://auth callback window ------------------------------------------
+
+    /**
+     * The guard behind WhaaackViewModel.adoptAuthLink. MainActivity is an exported launcher
+     * activity, so another app on the device can hand it a `whaaack://auth` link carrying a
+     * *genuinely valid* token pair of its own; verifying the tokens proves only that they are
+     * somebody's live session, never that this player asked for them, so the app used to adopt
+     * them silently and put the player into the sender's account. Nothing here is closed by
+     * anything server-side — the tokens really are valid — so the client has to hold it.
+     */
+    @Test
+    fun `a callback is not believed unless this device asked for a link`() = runBlocking {
+        assertFalse(client.authCallbackExpected())
+
+        client.expectAuthCallback()
+        assertTrue(client.authCallbackExpected())
+    }
+
+    @Test
+    fun `the window shuts when the link is spent`() = runBlocking {
+        client.expectAuthCallback()
+        client.forgetAuthCallback()
+
+        // A second link arriving inside the original two hours is refused: GoTrue's links are
+        // single-use, so nothing legitimate needs the window again once one has been adopted.
+        assertFalse(client.authCallbackExpected())
+    }
+
+    @Test
+    fun `an expired window is not a window`() = runBlocking {
+        // A link asked for long enough ago that its own otp_expiry has passed twice over.
+        store.callbackExpectedUntil = System.currentTimeMillis() - 1_000L
+        assertFalse(client.authCallbackExpected())
+    }
+
+    @Test
+    fun `signing out forgets an outstanding link`() = runBlocking {
+        client.expectAuthCallback()
+        client.clearSession()
+
+        assertFalse(client.authCallbackExpected())
+    }
+
     // ---- fixtures --------------------------------------------------------------------
 
     private fun session(
@@ -262,7 +306,16 @@ private class InMemorySessionStore : SessionStore {
         session = session?.copy(displayName = name)
     }
 
+    var callbackExpectedUntil = 0L
+
+    override suspend fun expectAuthCallback(untilMs: Long) {
+        callbackExpectedUntil = untilMs
+    }
+
+    override suspend fun authCallbackExpectedUntil(): Long = callbackExpectedUntil
+
     override suspend fun clear() {
         session = null
+        callbackExpectedUntil = 0L
     }
 }

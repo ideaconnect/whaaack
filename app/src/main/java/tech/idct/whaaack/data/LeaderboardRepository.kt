@@ -79,7 +79,12 @@ class LeaderboardRepository(private val client: SupabaseClient) {
         if (!client.isConfigured) return false
         if (client.currentSession() == null) return false
         val payload = buildJsonObject {
-            put("millis", JsonPrimitive(millis.coerceIn(0, 86_400_000).toInt()))
+            // Mirrors scores_millis_plausible (migration 20260817000000). Clamping rather
+            // than sending it through matters: the server *refuses* an over-ceiling row, and
+            // a refusal is reported to the player as a score that failed to save. Nothing the
+            // engine can produce comes near ten minutes, so this only ever fires on a clock
+            // or arithmetic fault — where losing the excess beats losing the run.
+            put("millis", JsonPrimitive(millis.coerceIn(0, 600_000).toInt()))
             put("hits", JsonPrimitive(hits))
             put("top_speed", JsonPrimitive(topSpeed))
         }

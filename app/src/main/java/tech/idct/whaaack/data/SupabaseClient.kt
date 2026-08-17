@@ -257,5 +257,27 @@ class SupabaseClient(
 
     suspend fun cacheDisplayName(name: String) = sessions.saveDisplayName(name)
 
+    /**
+     * Opens the window in which a `whaaack://auth` callback carrying tokens is believable,
+     * starting now. Called by the three flows that ask GoTrue to send such a link.
+     */
+    suspend fun expectAuthCallback() =
+        sessions.expectAuthCallback(System.currentTimeMillis() + AUTH_CALLBACK_WINDOW_MS)
+
+    /** True while a link this device asked for could still legitimately arrive. */
+    suspend fun authCallbackExpected(): Boolean =
+        System.currentTimeMillis() < sessions.authCallbackExpectedUntil()
+
+    suspend fun forgetAuthCallback() = sessions.expectAuthCallback(0L)
+
     suspend fun clearSession() = sessions.clear()
+
+    private companion object {
+        /**
+         * Comfortably longer than the links themselves live — `otp_expiry` is 1800s — so the
+         * window never expires before the only thing that can use it does, and clock skew
+         * between the device and GoTrue cannot turn a good link into a refused one.
+         */
+        const val AUTH_CALLBACK_WINDOW_MS = 2 * 60 * 60 * 1000L
+    }
 }

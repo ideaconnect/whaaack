@@ -244,6 +244,38 @@ Deno.serve(async (req: Request): Promise<Response> => {
   const userId = session.user?.id;
   if (!userId) return failed(500, "no_user_id", "verifyOtp session carried no user id");
 
+  // An account that was already there has to be shown to be *ours* before we adopt it.
+  //
+  // Everything above keys a player to a derived address and then signs into whatever answers
+  // to it. That is right for a returning player and for the race two paragraphs up, and wrong
+  // for one case nothing else here rules out: `pgs-<playerId>@pgs.whaaack.invalid` is an
+  // ordinary-looking address, signup is open, and no domain is reserved — so it can be
+  // *registered*, by someone who is not this player. Then createUser fails, its error is held
+  // by design, generateLink finds the stranger's row, and the stamp below writes our provider
+  // onto it and hands this player a session on an account whose password somebody else chose.
+  // Before the stamp, deliberately: the stamp is what would make that adoption permanent.
+  //
+  // Gated on createError, not run unconditionally. A createUser that *succeeded* created the
+  // row, so it is ours by construction and needs no evidence — which also means a first-time
+  // player can never be refused here by a disagreement about where GoTrue keeps the metadata.
+  // Only the path where the row already existed has anything to prove. There, createUser puts
+  // pgs_player_id in user_metadata so every account this function has made carries it and no
+  // email signup does, and a returning player has it in app_metadata from the stamp as well.
+  // Comparing the id rather than testing the key's presence also refuses a row minted for a
+  // different player. The race stays safe: the loser's row was made by the winner, and the
+  // winner's row carries the same id.
+  if (createError) {
+    const claimedBy = session.user?.user_metadata?.pgs_player_id ??
+      session.user?.app_metadata?.pgs_player_id;
+    if (claimedBy !== playerId) {
+      return failed(409, "address_taken", {
+        note: "derived address resolved to an account this function did not create",
+        userId,
+        claimedBy: claimedBy ?? null,
+      });
+    }
+  }
+
   const stampedMeta = { provider: "play_games", providers: ["play_games"], pgs_player_id: playerId };
   const stamped = await admin.auth.admin.updateUserById(userId, { app_metadata: stampedMeta });
   if (stamped.error) return failed(500, "stamp_failed", stamped.error);

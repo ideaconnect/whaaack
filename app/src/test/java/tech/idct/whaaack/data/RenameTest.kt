@@ -158,7 +158,16 @@ private class RecordingSessionStore : SessionStore {
         session = session?.copy(displayName = name)
     }
 
+    var callbackExpectedUntil = 0L
+
+    override suspend fun expectAuthCallback(untilMs: Long) {
+        callbackExpectedUntil = untilMs
+    }
+
+    override suspend fun authCallbackExpectedUntil(): Long = callbackExpectedUntil
+
     override suspend fun clear() {
         session = null
+        callbackExpectedUntil = 0L
     }
 }

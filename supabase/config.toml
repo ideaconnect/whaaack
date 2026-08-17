@@ -26,6 +26,20 @@ refresh_token_reuse_interval = 10
 enable_anonymous_sign_ins = false
 enable_signup = true
 
+# The rule the signup and change-password screens advertise, stated where it is actually
+# enforced. `isStrongPassword` in AuthRepository is the client half, and on its own it bound
+# only this APK: a direct POST /auth/v1/signup with the publishable key that ships inside it —
+# or an older APK still installed after the client was tightened — created accounts under
+# GoTrue's own default floor of 6 characters with no character requirement at all.
+#
+# `letters_digits` is the closest GoTrue expresses to "including a number". It also requires a
+# letter, which "12345678" does not have, so the client check requires one too: the two agree
+# exactly rather than one refusing what the other accepts. Raising either alone would have
+# been worse than leaving both — a server stricter than the form silently rejects a password
+# the player was just told was fine.
+minimum_password_length = 8
+password_requirements = "letters_digits"
+
 [auth.email]
 enable_signup = true
 # Players must prove the address before their name can appear on a public leaderboard.

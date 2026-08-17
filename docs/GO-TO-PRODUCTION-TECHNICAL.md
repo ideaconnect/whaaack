@@ -826,12 +826,16 @@ reasoning survives.
   2am. This rarely blocks first review; it is what gets an app suspended after one complaint.
 
 - [ ] **Set a server-side password policy and enable leaked-password protection** 🟡
-  `isStrongPassword` enforces 8 characters and a digit — but only inside the APK. GoTrue's default
-  `minimum_password_length` is 6, so anyone hitting `/auth/v1/signup` directly (or an older APK
-  still installed after you tighten the client) creates a weak account that RLS then trusts for
-  life. Add `minimum_password_length = 8` and a `password_requirements` string to `[auth]` and
-  push. Turn on the HaveIBeenPwned check at Authentication → Policies — it is a Pro feature, so
-  fold it into the plan upgrade.
+  **written, not yet pushed.** `isStrongPassword` enforced 8 characters and a digit — but only
+  inside the APK. GoTrue's default `minimum_password_length` is 6, so anyone hitting
+  `/auth/v1/signup` directly (or an older APK still installed after you tighten the client)
+  creates a weak account that RLS then trusts for life. `[auth]` now carries
+  `minimum_password_length = 8` and `password_requirements = "letters_digits"`, and the client
+  gained the matching letter clause so the two halves accept exactly the same passwords — an
+  all-digit `12345678` would otherwise have passed the form and been refused by the server.
+  **`supabase config push` is still outstanding, and until it runs the remote is unchanged.**
+  Turn on the HaveIBeenPwned check at Authentication → Policies — it is a Pro feature, so fold
+  it into the plan upgrade.
 
 - [x] **Pin `search_path` on the two remaining unpinned functions** — **done, pushed and verified**
   Every `SECURITY DEFINER` function was correctly pinned already. `enforce_display_name_cooldown()`
