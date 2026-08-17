@@ -1,0 +1,9 @@
+Smaller download, and lighter on your device's memory.
+
+The board now sizes itself to your screen, so it stays comfortable on a tablet, in a
+split-screen pane and at large system font sizes.
+
+Fixed a dialog whose button could sit off the bottom of the screen at large font sizes.
+
+Achievements now appear only when Play Games has actually signed you in, and say what
+went wrong instead of doing nothing.
