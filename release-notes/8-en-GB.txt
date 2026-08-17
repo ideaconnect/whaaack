@@ -1,9 +1,6 @@
-Smaller download, and lighter on your device's memory.
+Achievements: fixed a button that did nothing.
 
-The board now sizes itself to your screen, so it stays comfortable on a tablet, in a
-split-screen pane and at large system font sizes.
-
-Fixed a dialog whose button could sit off the bottom of the screen at large font sizes.
-
-Achievements now appear only when Play Games can actually show them — signed in, with
-the Google Play Games app installed — instead of a button that did nothing.
+The achievements screen lives in the Google Play Games app, which not every phone has
+installed — and without it there was nothing to open. Whaaack! now shows the
+Achievements entry only when Play Games can actually open it. Install Google Play
+Games to get it back.

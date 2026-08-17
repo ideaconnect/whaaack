@@ -67,7 +67,7 @@ android {
         minSdk = 26
         targetSdk = 36
         versionCode = 8
-        versionName = "Dobromir"
+        versionName = "Filemon"
 
         // The AdMob application id is not a secret — it ships in every APK's manifest.
         manifestPlaceholders["admobAppId"] = secret(
