@@ -1,0 +1,23 @@
+# app-ads.txt - IAB Tech Lab spec v1.0. Lines starting with # are ignored.
+#
+# Declares who may sell ad inventory in IDCT's Android apps.
+#
+# THIS COPY IS NOT THE ONE CRAWLERS READ, and it cannot be. A crawler takes the
+# developer website from the app's Play listing, reduces it to the bare domain and
+# fetches only <root>/app-ads.txt - so the file that actually governs serving is
+# https://idct.tech/app-ads.txt, owned by the org's apex Pages repo. This repo is a
+# *project* page: everything under website/ serves beneath /whaaack/, so the most
+# this copy can ever answer is https://idct.tech/whaaack/app-ads.txt, which no
+# crawler requests. It exists because it was asked for, and it is harmless.
+#
+# The consequence to respect: there are now two of these on one domain. Keep the
+# record line below byte-identical to the apex copy. Two app-ads.txt files that
+# disagree about who may sell inventory is a worse position than having one, and
+# only the apex copy has any effect - so if they ever drift, this one is wrong by
+# definition. The comments differ deliberately, because they describe different
+# locations; the spec ignores them.
+#
+# google.com = Google AdMob; pub-6904561240517963 = the AdMob publisher id
+# (account-wide, so one record covers every app on this account);
+# f08c47fec0942fa0 = Google's TAG certification id, the same for all publishers.
+google.com, pub-6904561240517963, DIRECT, f08c47fec0942fa0

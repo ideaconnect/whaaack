@@ -59,12 +59,23 @@ jobs:
             website/contact/thanks/index.html \
             website/404.html \
             website/sitemap.xml \
+            website/app-ads.txt \
             website/assets/css/site.css \
             website/assets/js/site.js
           do
             if [ ! -f "$f" ]; then echo "::error::missing $f"; missing=1; fi
           done
           exit $missing
+
+      # The only line in app-ads.txt that has any effect, and the only file here that
+      # nothing else can vouch for: no page links to it, so a mangled record would not
+      # break a link, fail an anchor check or 404 anywhere. The header is long enough that
+      # an edit can leave it looking untouched. The publisher id must stay in step with the
+      # AdMob application id in app/build.gradle.kts.
+      - name: Verify the app-ads.txt record is intact
+        run: |
+          grep -qxF 'google.com, pub-6904561240517963, DIRECT, f08c47fec0942fa0' website/app-ads.txt \
+            || { echo "::error file=website/app-ads.txt::the DIRECT record line is missing or altered"; exit 1; }
 
       # The contact form redirects here after a successful submit, and Web3Forms
       # sends the visitor to whatever absolute URL is baked into the form. If the
