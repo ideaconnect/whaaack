@@ -432,6 +432,40 @@ constraint as everything else here — see §2.
 
 If nothing authenticates at all, it is §2 — not this section.
 
+### "The Achievements button does nothing"
+
+It is never a dead control: every path through it now ends in either the Play Games UI or a line the
+player can read, and in a log line under `PlayGames`. Work through it in this order.
+
+1. **`adb logcat -s PlayGames`, then press it.** One line names the cause, and the rest of this list is
+   only for reading that line.
+2. **Nothing in the log at all** — the press never reached Play Games. The control is only on screen when
+   `isAuthenticated()` has answered true, so this is the odd one; check the tap landed (Home's chip shares
+   its row with *Leaderboard*).
+3. **"Achievements UI unavailable"** — Play Games declined to build the Intent. The line after it is an
+   `ApiException` whose number is the answer; it is a `CommonStatusCodes` value, and **4 is
+   `SIGN_IN_REQUIRED`**, which is what a lapsed or never-completed Play Games sign-in looks like. Verified
+   on an emulator with no Play Games account:
+
+   ```
+   W PlayGames: Achievements UI unavailable
+   W PlayGames: com.google.android.gms.common.api.ApiException: 4:
+       at ...zzcj.getAchievementsIntent(com.google.android.gms:play-services-games-v2@@22.0.0:1)
+       at tech.idct.whaaack.games.PlayGamesManager.openAchievements(PlayGamesManager.kt:305)
+   ```
+
+   The app answers a 4 by lowering `authenticated`, which takes the control off the screen behind the
+   toast: Settings swaps it for its "Sign in to Play Games" row, and Home's chip goes. It does **not**
+   raise a sign-in prompt off the back of an Achievements press — achievements are offered only to a
+   player Play Games has already signed in, and the sign-in row is the one door in. Any other status code
+   is not a sign-in problem; look it up.
+4. **"Achievements Intent would not start"** — Play Games handed back an Intent that resolves to nothing.
+   Play Games disabled on the device, or restricted for the account.
+5. **Play Games opens and closes immediately, with nothing in the log** — this is a console state, not a
+   client bug: the achievements exist but this player may not see them. Check §3 — the Play Games Services
+   configuration must be **published**, and until it is, only accounts on the **Testers** list can
+   authenticate or see anything. A tester-less, unpublished setup looks exactly like a broken button.
+
 ---
 
 ## 8. Accounts minted from Play Games

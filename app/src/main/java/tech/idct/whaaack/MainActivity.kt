@@ -300,7 +300,14 @@ private fun WhaaackApp(vm: WhaaackViewModel, onGoogleSignIn: () -> Unit) {
                     },
                     onLeaderboard = { vm.go(Screen.LEADERBOARD) },
                     onAchievements = { activity?.let { vm.showAchievements(it) } },
-                    onSettings = { vm.go(Screen.SETTINGS) },
+                    // Re-asks Play Games on the way in, because Settings is where the answer is
+                    // acted on: it shows an Achievements row to a signed-in player and a sign-in
+                    // row to everyone else, and the state behind that was last refreshed at
+                    // onResume — which can be a whole session ago on a screen reached without one.
+                    onSettings = {
+                        activity?.let { vm.syncPlayGames(it) }
+                        vm.go(Screen.SETTINGS)
+                    },
                     onLogout = { vm.signOut() },
                     onRemoveAds = { activity?.let { vm.buyRemoveAds(it) } },
                 )

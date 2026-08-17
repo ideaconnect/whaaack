@@ -830,6 +830,22 @@ class WhaaackViewModel(app: Application) : AndroidViewModel(app) {
         playGames.reportBest(activity, best)
     }
 
+    /**
+     * Opens the Play Games achievements UI.
+     *
+     * A press that fails is answered with a line and *not* with a sign-in prompt. Achievements are
+     * offered only to a player Play Games has already signed in — nothing here tries to talk one
+     * into it, and a control that raised an account flow would be exactly the offer this app does
+     * not make. The failure Play Games actually returns for an absent sign-in is
+     * `ApiException: 4` (`SIGN_IN_REQUIRED`), and [PlayGamesManager.openAchievements] answers it by
+     * lowering `authenticated`, which takes this control off the screen behind the toast and puts
+     * Settings' "Sign in to Play Games" row in its place. That row is the one door in, and the
+     * player chooses to use it.
+     *
+     * The other reasons a press can fail cannot be fixed from here at all: no Play Games on the
+     * device, or a Play Games Services project that is not published, which only admits accounts on
+     * its Testers list. `adb logcat -s PlayGames` names which — see docs/PLAY-GAMES.md §7.
+     */
     fun showAchievements(activity: Activity) {
         audio.blip()
         playGames.openAchievements(activity) { message ->

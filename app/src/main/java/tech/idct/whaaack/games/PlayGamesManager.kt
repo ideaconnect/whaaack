@@ -293,10 +293,22 @@ class PlayGamesManager(
      * button. It fires when Play Games declines to build the Intent, which in practice means
      * the sign-in did not hold — the Activity may also be gone by the time the Task lands,
      * which is a race, not a failure, and is left to the platform to ignore.
+     *
+     * Handing back an Intent is not the same as that Intent going anywhere. Play Games can be
+     * disabled, or restricted for the account, and then `startActivity` throws from inside a
+     * *success* callback — which took the process down and, either way, left the player looking
+     * at a button that did nothing. Both halves now end in the same visible line, and both log
+     * under `PlayGames` so a report of "the achievements button does nothing" has an answer:
+     * `adb logcat -s PlayGames`.
      */
     fun openAchievements(activity: Activity, onUnavailable: (String) -> Unit) {
         PlayGames.getAchievementsClient(activity).getAchievementsIntent()
-            .addOnSuccessListener { intent -> activity.startActivity(intent) }
+            .addOnSuccessListener { intent ->
+                runCatching { activity.startActivity(intent) }.onFailure { error ->
+                    Log.w(TAG, "Achievements Intent would not start", error)
+                    onUnavailable("Couldn't open Play Games achievements on this device.")
+                }
+            }
             .addOnFailureListener { error ->
                 Log.w(TAG, "Achievements UI unavailable", error)
                 _authenticated.value = false
