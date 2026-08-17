@@ -161,6 +161,12 @@ jobs:
       #
       # play.google.com is pre-approved: the store badge is scheduled to land here at launch,
       # and a red CI run on that edit would be noise rather than signal.
+      #
+      # takeout.google.com is the delete-account page's route to a player's own Play Games
+      # player ID, which they need in order to name the account they are asking us to delete.
+      # An outbound link and nothing more — the page sends it no data, so it is not a
+      # recipient and does not belong in the privacy policy's list. It gets a line here
+      # because the deliberate look it exists to force has now been taken.
       - name: Verify no cleartext URLs and no undeclared third-party hosts
         run: |
           set -u
@@ -177,6 +183,7 @@ jobs:
           play.google.com
           support.google.com
           policies.google.com
+          takeout.google.com
           uodo.gov.pl
           uokik.gov.pl
           HOSTS
