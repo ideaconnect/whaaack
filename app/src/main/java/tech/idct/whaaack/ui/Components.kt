@@ -7,6 +7,7 @@ import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -15,24 +16,35 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.State
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
@@ -42,6 +54,7 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
@@ -61,6 +74,9 @@ import tech.idct.whaaack.ui.theme.DangerSoft
 import tech.idct.whaaack.ui.theme.Hairline
 import tech.idct.whaaack.ui.theme.PanelNavy
 import kotlin.math.ceil
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.distinctUntilChanged
 
 /**
  * The parallax orchard behind every menu screen.
@@ -235,6 +251,7 @@ fun FieldLabel(text: String) {
     )
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun WhaaackField(
     value: String,
@@ -244,12 +261,45 @@ fun WhaaackField(
     isError: Boolean = false,
     isPassword: Boolean = false,
     keyboardOptions: KeyboardOptions = KeyboardOptions.Default,
+    /**
+     * What the IME's action key does. Pointless without an `imeAction` in [keyboardOptions] —
+     * the pair is how a form hands focus from one field to the next instead of leaving the
+     * player to aim at a field the keyboard is halfway over.
+     */
+    keyboardActions: KeyboardActions = KeyboardActions.Default,
 ) {
+    val bringIntoView = remember { BringIntoViewRequester() }
+    var focused by remember { mutableStateOf(false) }
+    val density = LocalDensity.current
+    val ime = WindowInsets.ime
+
+    // A focused field scrolls itself clear of the keyboard on its own, but only once, against
+    // the viewport as it stands at that moment — and the keyboard is not done moving. Hopping
+    // from the email field to the password one swaps the text IME for the password one, which
+    // is a number row taller, and the field that had just been revealed ends up half behind
+    // it. So re-ask whenever the inset settles on a new height.
+    //
+    // Read through snapshotFlow rather than in the composable body: the inset changes every
+    // frame of the keyboard animation, and reading it there would recompose every field on
+    // the screen just as often. collectLatest restarts the wait on each new value, so the
+    // request goes out once, after the animation has stopped.
+    LaunchedEffect(focused) {
+        if (!focused) return@LaunchedEffect
+        snapshotFlow { ime.getBottom(density) }
+            .distinctUntilChanged()
+            .collectLatest {
+                delay(IME_SETTLE_MS)
+                bringIntoView.bringIntoView()
+            }
+    }
+
     TextField(
         value = value,
         onValueChange = onValueChange,
         modifier = modifier
             .fillMaxWidth()
+            .bringIntoViewRequester(bringIntoView)
+            .onFocusChanged { focused = it.isFocused }
             .clip(RoundedCornerShape(16.dp))
             .border(
                 1.5.dp,
@@ -261,6 +311,7 @@ fun WhaaackField(
         visualTransformation =
             if (isPassword) PasswordVisualTransformation() else VisualTransformation.None,
         keyboardOptions = keyboardOptions,
+        keyboardActions = keyboardActions,
         textStyle = LocalTextStyle.current.copy(fontSize = 15.sp, fontWeight = FontWeight.SemiBold),
         colors = TextFieldDefaults.colors(
             focusedContainerColor = Color(0x8C091428),
@@ -275,6 +326,14 @@ fun WhaaackField(
         ),
     )
 }
+
+/**
+ * How still the keyboard has to be before the field below it asks to be scrolled into view.
+ * Not the length of the slide — collectLatest restarts this wait on every frame of it, so it
+ * only has to outlast one frame. Short enough that the scroll still reads as part of the same
+ * movement rather than as a correction after it.
+ */
+private const val IME_SETTLE_MS = 120L
 
 @Composable
 fun ErrorBanner(title: String, body: String, modifier: Modifier = Modifier) {

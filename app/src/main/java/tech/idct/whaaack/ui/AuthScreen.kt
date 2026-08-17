@@ -9,11 +9,13 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
@@ -26,9 +28,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -59,10 +65,37 @@ fun AuthScreen(
     var password by rememberSaveable { mutableStateOf("") }
     var displayName by rememberSaveable { mutableStateOf("") }
 
+    // Each field hands focus to the next one by name rather than through
+    // FocusDirection.Next: "Forgot your password?" sits between the email and the password in
+    // layout order and is clickable, which makes it focusable, so the automatic traversal
+    // stops on a link rather than on the field the player is heading for.
+    val emailFocus = remember { FocusRequester() }
+    val passwordFocus = remember { FocusRequester() }
+    val keyboard = LocalSoftwareKeyboardController.current
+
+    // Drops the keyboard before submitting: what comes back is either an error banner near
+    // the top of this form or a change of screen, and neither is visible from behind the IME.
+    // Hiding it rather than clearing focus, deliberately — clearFocus() hands the focus back
+    // to the root, which re-runs traversal from the top of the screen and scrolls the form
+    // away from the button that was just pressed.
+    fun submit() {
+        keyboard?.hide()
+        if (signUp) onSignUp(email, password, displayName) else onSignIn(email, password)
+    }
+
     Column(
         Modifier
             .fillMaxSize()
             .systemBarsPadding()
+            // Outside the verticalScroll, so an open keyboard shrinks the scrolling viewport
+            // instead of covering it. The window is edge-to-edge (see enableEdgeToEdge in
+            // MainActivity), so on API 30+ nothing else moves this content out from under the
+            // IME — without it the Column stayed full-height, had nothing to scroll, and the
+            // password field and the submit button below it were simply unreachable until the
+            // keyboard was dismissed. It also gives the focused field somewhere to scroll
+            // itself into. systemBarsPadding above has already consumed the navigation bar
+            // inset, so the two do not stack.
+            .imePadding()
             .verticalScroll(rememberScrollState())
             .padding(horizontal = 22.dp, vertical = 16.dp),
     ) {
@@ -162,6 +195,8 @@ fun AuthScreen(
                 value = displayName,
                 onValueChange = { displayName = it },
                 placeholder = "Shown on the leaderboard",
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
+                keyboardActions = KeyboardActions(onNext = { emailFocus.requestFocus() }),
             )
             Spacer(Modifier.height(6.dp))
             // The same rules the database holds, said before they can be broken rather than
@@ -180,7 +215,12 @@ fun AuthScreen(
             value = email,
             onValueChange = { email = it },
             placeholder = "you@example.com",
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
+            modifier = Modifier.focusRequester(emailFocus),
+            keyboardOptions = KeyboardOptions(
+                keyboardType = KeyboardType.Email,
+                imeAction = ImeAction.Next,
+            ),
+            keyboardActions = KeyboardActions(onNext = { passwordFocus.requestFocus() }),
         )
 
         Spacer(Modifier.height(14.dp))
@@ -202,8 +242,15 @@ fun AuthScreen(
             value = password,
             onValueChange = { password = it },
             placeholder = "••••••••",
+            modifier = Modifier.focusRequester(passwordFocus),
             isPassword = true,
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+            keyboardOptions = KeyboardOptions(
+                keyboardType = KeyboardType.Password,
+                imeAction = ImeAction.Done,
+            ),
+            // The last field submits, like the button does — and is held during a request for
+            // the same reason the button is disabled.
+            keyboardActions = KeyboardActions(onDone = { if (!state.busy) submit() }),
         )
         if (signUp) {
             Spacer(Modifier.height(6.dp))
@@ -219,9 +266,7 @@ fun AuthScreen(
             text = if (state.busy) "Working…" else if (signUp) "Create account" else "Sign in",
             height = 58,
             enabled = !state.busy,
-            onClick = {
-                if (signUp) onSignUp(email, password, displayName) else onSignIn(email, password)
-            },
+            onClick = { submit() },
         )
 
         Spacer(Modifier.height(12.dp))
@@ -252,48 +297,67 @@ fun ForgotPasswordScreen(
 ) {
     var email by rememberSaveable { mutableStateOf("") }
     val sentTo = state.resetEmailSent
+    val keyboard = LocalSoftwareKeyboardController.current
+
+    fun submit() {
+        keyboard?.hide()
+        onSend(email)
+    }
 
     Column(
         Modifier
             .fillMaxSize()
             .systemBarsPadding()
+            // Same reason as the sign-in form above: edge-to-edge means the keyboard overlays
+            // the window rather than resizing it, so the space left for the content has to be
+            // taken here or the send button ends up behind the IME on a short screen.
+            .imePadding()
             .padding(horizontal = 22.dp, vertical = 16.dp),
     ) {
         CircleIconButton("‹", onBack)
 
         if (sentTo == null) {
-            Spacer(Modifier.height(16.dp))
-            Text("Reset password", color = Cream, fontSize = 32.sp, fontWeight = FontWeight.Black)
-            Spacer(Modifier.height(5.dp))
-            Text(
-                "Tell us the email on your account and we'll send a reset link. " +
-                    "It expires in 30 minutes.",
-                color = Color(0xB8FFF3E6),
-                fontSize = 13.sp,
-                lineHeight = 19.sp,
-            )
-
-            state.authError?.let {
+            // The scroll goes on this branch rather than on the Column above, because the
+            // confirmation branch below centres itself with a weight — and a weight cannot be
+            // measured inside a scrolling parent, whose children get an infinite height.
+            Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
                 Spacer(Modifier.height(16.dp))
-                ErrorBanner(it.title, it.body)
+                Text("Reset password", color = Cream, fontSize = 32.sp, fontWeight = FontWeight.Black)
+                Spacer(Modifier.height(5.dp))
+                Text(
+                    "Tell us the email on your account and we'll send a reset link. " +
+                        "It expires in 30 minutes.",
+                    color = Color(0xB8FFF3E6),
+                    fontSize = 13.sp,
+                    lineHeight = 19.sp,
+                )
+
+                state.authError?.let {
+                    Spacer(Modifier.height(16.dp))
+                    ErrorBanner(it.title, it.body)
+                }
+
+                Spacer(Modifier.height(20.dp))
+                FieldLabel("Email")
+                WhaaackField(
+                    value = email,
+                    onValueChange = { email = it },
+                    placeholder = "you@example.com",
+                    keyboardOptions = KeyboardOptions(
+                        keyboardType = KeyboardType.Email,
+                        imeAction = ImeAction.Done,
+                    ),
+                    keyboardActions = KeyboardActions(onDone = { if (!state.busy) submit() }),
+                )
+
+                Spacer(Modifier.height(20.dp))
+                PrimaryButton(
+                    text = if (state.busy) "Sending…" else "Send reset link",
+                    height = 58,
+                    enabled = !state.busy,
+                    onClick = { submit() },
+                )
             }
-
-            Spacer(Modifier.height(20.dp))
-            FieldLabel("Email")
-            WhaaackField(
-                value = email,
-                onValueChange = { email = it },
-                placeholder = "you@example.com",
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
-            )
-
-            Spacer(Modifier.height(20.dp))
-            PrimaryButton(
-                text = if (state.busy) "Sending…" else "Send reset link",
-                height = 58,
-                enabled = !state.busy,
-                onClick = { onSend(email) },
-            )
         } else {
             Column(
                 Modifier.weight(1f).fillMaxWidth(),

@@ -63,7 +63,14 @@
              strikes would carry on regardless. Rather than referee a window nobody can play
              in, decline to be put in one. The engine also pauses itself if it ever happens
              anyway (see GameSurfaceView), because free-form and desktop windowing do not
-             always honour this. -->
+             always honour this.
+
+             windowSoftInputMode="adjustResize" is for the auth forms, and only matters below
+             API 30. The activity is edge-to-edge, so from API 30 the IME never resizes the
+             window and Modifier.imePadding() on those screens is what makes room for the
+             keyboard. Older devices report no ime inset at all, so there imePadding() is zero
+             and this is the mechanism instead: the window shrinks and the same scroll works.
+             Nothing else in the app takes text input, and neither path double-counts. -->
         <activity
             android:name=".MainActivity"
             android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|uiMode|density|smallestScreenSize"
@@ -72,6 +79,7 @@
             android:resizeableActivity="false"
             android:screenOrientation="portrait"
             android:theme="@style/Theme.Whaaack"
+            android:windowSoftInputMode="adjustResize"
             tools:ignore="DiscouragedApi,LockedOrientationActivity">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
