@@ -1,6 +1,7 @@
 package tech.idct.whaaack.games
 
 import android.app.Activity
+import android.content.Context
 import android.util.Log
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -88,6 +89,24 @@ class PlayGamesManager(
     val onDevice: StateFlow<Boolean?> = _onDevice.asStateFlow()
 
     /**
+     * Whether this device can *show* achievements, which is a narrower question than whether it
+     * can sign a player in.
+     *
+     * Signing in is Google Play services' job, and Play services is on every device that has Play
+     * at all. The achievements screen is not: it is an activity inside the Google Play Games app,
+     * a separate install that plenty of phones never ship. On one of those, everything upstream
+     * succeeds — the SDK initialises, the automatic sign-in lands, [authenticated] answers true —
+     * and the UI then has nowhere to open. That is the "the Achievements button does nothing"
+     * report, and no amount of error handling makes such a button worth offering, so the control
+     * is hidden instead. See the `<queries>` block in AndroidManifest.xml, without which this
+     * question cannot even be asked from API 30 on.
+     *
+     * Null until [refresh] has looked once.
+     */
+    private val _achievementsUi = MutableStateFlow<Boolean?>(null)
+    val achievementsUi: StateFlow<Boolean?> = _achievementsUi.asStateFlow()
+
+    /**
      * Milestones Play Games has confirmed for this process, so a re-award is cheap.
      *
      * Only ever added to on *success*. A failed unlock deliberately stays out, which is what
@@ -106,6 +125,10 @@ class PlayGamesManager(
      * confirmed, rather than from a flow collector with no Activity in reach.
      */
     fun refresh(activity: Activity, onResult: (Boolean) -> Unit = {}) {
+        // Asked on every refresh rather than once: the Play Games app can be installed — or
+        // uninstalled — while this process is alive, and a control that appears at the next resume
+        // is a better answer than one that waits for a cold start.
+        _achievementsUi.value = hasPlayGamesApp(activity)
         PlayGames.getGamesSignInClient(activity).isAuthenticated()
             .addOnCompleteListener { task ->
                 val ok = task.isSuccessful && task.result.isAuthenticated
@@ -297,27 +320,65 @@ class PlayGamesManager(
      * Handing back an Intent is not the same as that Intent going anywhere. Play Games can be
      * disabled, or restricted for the account, and then `startActivity` throws from inside a
      * *success* callback — which took the process down and, either way, left the player looking
-     * at a button that did nothing. Both halves now end in the same visible line, and both log
-     * under `PlayGames` so a report of "the achievements button does nothing" has an answer:
-     * `adb logcat -s PlayGames`.
+     * at a button that did nothing.
+     *
+     * `addOnCompleteListener`, not the success/failure pair, and that is the whole point: a
+     * [com.google.android.gms.tasks.Task] has *three* terminal states, and the pair covers two of
+     * them. A **cancelled** Task — which is what Play Games hands back when it abandons the
+     * request rather than refusing it — fired neither listener, so the press produced no UI, no
+     * toast, and not one line in the log. That is precisely the "the button does nothing" report,
+     * and on a signed-in device it is the only shape that fits: a refusal would have said so.
+     * [refresh] and [signIn] in this same class have always used a complete listener; this one was
+     * the odd one out.
+     *
+     * A cancellation deliberately does *not* lower [authenticated]. It says nothing about the
+     * sign-in — unlike a failure, which usually means it has lapsed — so the control stays where
+     * it is and the player can press it again, which is the right answer to a transient abandon.
+     *
+     * Every path logs under `PlayGames`, so a report of a dead button always has an answer:
+     * `adb logcat -s PlayGames`. See docs/PLAY-GAMES.md §7.
      */
     fun openAchievements(activity: Activity, onUnavailable: (String) -> Unit) {
         PlayGames.getAchievementsClient(activity).getAchievementsIntent()
-            .addOnSuccessListener { intent ->
-                runCatching { activity.startActivity(intent) }.onFailure { error ->
-                    Log.w(TAG, "Achievements Intent would not start", error)
-                    onUnavailable("Couldn't open Play Games achievements on this device.")
+            .addOnCompleteListener { task ->
+                when {
+                    task.isSuccessful -> {
+                        runCatching { activity.startActivity(task.result) }.onFailure { error ->
+                            Log.w(TAG, "Achievements Intent would not start", error)
+                            onUnavailable("Couldn't open Play Games achievements on this device.")
+                        }
+                    }
+
+                    task.isCanceled -> {
+                        Log.w(TAG, "Achievements UI request was cancelled by Play Games")
+                        onUnavailable("Play Games didn't open achievements. Try again.")
+                    }
+
+                    else -> {
+                        Log.w(TAG, "Achievements UI unavailable", task.exception)
+                        _authenticated.value = false
+                        onUnavailable("Couldn't open Play Games — try signing in to it again.")
+                    }
                 }
-            }
-            .addOnFailureListener { error ->
-                Log.w(TAG, "Achievements UI unavailable", error)
-                _authenticated.value = false
-                onUnavailable("Couldn't open Play Games — try signing in to it again.")
             }
     }
 
+    /**
+     * Whether the Google Play Games app is installed and launchable.
+     *
+     * `getLaunchIntentForPackage` rather than `getPackageInfo`: it answers the question actually
+     * being asked — is there an app here that can be brought to the front — and it is not one of
+     * the PackageManager calls deprecated in favour of the API 33 flags overloads. Null means no
+     * such package *or* no visibility of it, which for this purpose are the same answer.
+     */
+    private fun hasPlayGamesApp(context: Context): Boolean =
+        context.packageManager.getLaunchIntentForPackage(PLAY_GAMES_PACKAGE) != null
+
     internal companion object {
         private const val TAG = "PlayGames"
+
+        /** The Google Play Games app, which owns the achievements screen. */
+        private const val PLAY_GAMES_PACKAGE = "com.google.android.play.games"
 
         /**
          * Console ids per milestone, by way of BuildConfig — committed defaults, overridable

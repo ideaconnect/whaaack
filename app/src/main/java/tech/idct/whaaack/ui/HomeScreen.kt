@@ -192,7 +192,7 @@ fun HomeScreen(
             HomeChipButton("🏆  Leaderboard", Modifier.weight(1f), onLeaderboard)
             if (offerAccount) {
                 HomeChipButton("Create account", Modifier.weight(1f), onCreateAccount)
-            } else if (state.playGamesAuthenticated == true) {
+            } else if (state.offersAchievements) {
                 HomeChipButton("🎖  Achievements", Modifier.weight(1f), onAchievements)
             }
         }

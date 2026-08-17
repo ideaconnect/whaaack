@@ -146,6 +146,13 @@ data class UiState(
      */
     val playGamesOnDevice: Boolean? = null,
     /**
+     * Whether the achievements screen can be opened on this device at all — a narrower question
+     * again, because that screen lives in the Google Play Games *app* rather than in Play
+     * services, and plenty of phones have the second without the first. Null until the SDK has
+     * been asked once. See `PlayGamesManager.achievementsUi`.
+     */
+    val playGamesAchievementsUi: Boolean? = null,
+    /**
      * Whether this build can turn a Play Games player into a Whaaack! account at all — that
      * is, whether a Game server client id was configured. Blank is a supported state, and it
      * means only that ranked play still requires signing up, exactly as it did before.
@@ -170,6 +177,15 @@ data class UiState(
 
     /** Whether Home should show the ranked pair of buttons rather than the signed-out pair. */
     val offersRanked: Boolean get() = signedIn || canMintPlayGamesAccount
+
+    /**
+     * Whether to offer achievements at all — both conditions, because either one alone puts a
+     * control on screen that cannot work. Signed out of Play Games, the press is refused; without
+     * the Google Play Games app, the sign-in succeeds and the screen it would open does not exist.
+     * The second is the one that produced a button that did nothing on a real phone.
+     */
+    val offersAchievements: Boolean
+        get() = playGamesAuthenticated == true && playGamesAchievementsUi == true
 
     /**
      * Whether the auth screen lists Play Games beside email and Google.
@@ -316,6 +332,12 @@ class WhaaackViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             playGames.authenticated.collect { authenticated ->
                 _state.update { it.copy(playGamesAuthenticated = authenticated) }
+            }
+        }
+
+        viewModelScope.launch {
+            playGames.achievementsUi.collect { available ->
+                _state.update { it.copy(playGamesAchievementsUi = available) }
             }
         }
 

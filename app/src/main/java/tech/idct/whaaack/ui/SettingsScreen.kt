@@ -148,20 +148,29 @@ fun SettingsScreen(
                 // would be a button that cannot succeed however often it is pressed.
                 if (state.playGamesOnDevice == true) {
                     state.playGamesAuthenticated?.let { authenticated ->
-                        Spacer(Modifier.height(10.dp))
-                        SectionLabel("Play Games")
-                        if (authenticated) {
-                            ActionRow(
-                                "Achievements",
-                                "Your survival milestones",
-                                onClick = onAchievements,
-                            )
-                        } else {
-                            ActionRow(
-                                "Sign in to Play Games",
-                                "Track achievements on your Google account",
-                                onClick = onPlayGamesSignIn,
-                            )
+                        // Signed in is not enough for the Achievements row: that screen belongs to
+                        // the Google Play Games app, and on a device without it the row would open
+                        // nothing at all. A signed-in player there has no row of either kind —
+                        // achievements they cannot see, and a sign-in they have already done — so
+                        // the heading goes too rather than standing over nothing.
+                        val achievements = state.offersAchievements
+                        val signIn = !authenticated
+                        if (achievements || signIn) {
+                            Spacer(Modifier.height(10.dp))
+                            SectionLabel("Play Games")
+                            if (achievements) {
+                                ActionRow(
+                                    "Achievements",
+                                    "Your survival milestones",
+                                    onClick = onAchievements,
+                                )
+                            } else {
+                                ActionRow(
+                                    "Sign in to Play Games",
+                                    "Track achievements on your Google account",
+                                    onClick = onPlayGamesSignIn,
+                                )
+                            }
                         }
                     }
                 }

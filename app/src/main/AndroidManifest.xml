@@ -5,6 +5,20 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.VIBRATE" />
+
+    <!-- Play Games Services signs a player in through Google Play services, which is on every
+         device with Play on it — but the achievements *screen* is an activity in the Google Play
+         Games app, which is not. Plenty of phones ship without it, and there the sign-in succeeds,
+         `isAuthenticated()` answers true, and the achievements UI has nowhere to open: the button
+         does nothing, which is exactly the report that led here.
+
+         From Android 11 an app cannot see another package unless it declares it, so this is what
+         lets PlayGamesManager ask whether that app is there and hide the control when it is not.
+         The Play Games SDK's own manifest declares only com.google.android.gms and
+         com.android.vending, which is why this has to be ours. -->
+    <queries>
+        <package android:name="com.google.android.play.games" />
+    </queries>
     <!-- Required so the Ads SDK can read the advertising id on API 33+. -->
     <uses-permission android:name="com.google.android.gms.permission.AD_ID" />
 

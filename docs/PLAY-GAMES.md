@@ -432,6 +432,28 @@ constraint as everything else here — see §2.
 
 If nothing authenticates at all, it is §2 — not this section.
 
+### The Google Play Games app is a separate install, and the UI needs it
+
+Signing a player in is Google Play services' job, and Play services is on every device that has
+Play at all. The **achievements screen is not**: it is an activity inside the *Google Play Games*
+app (`com.google.android.play.games`), which plenty of phones never ship — a Xiaomi/POCO handset
+here had Play services, a signed-in Play Games player, and no Play Games app. On such a device the
+SDK initialises, the automatic sign-in lands, `isAuthenticated()` answers true, and the achievements
+UI has nowhere to open: a button that does nothing, and nothing in the log either.
+
+`PlayGamesManager.achievementsUi` asks whether that app is present and both entry points — Home's
+chip and the Settings row — are gated on it as well as on the sign-in (`UiState.offersAchievements`).
+Without the app, the Settings *section* goes too, heading and all, rather than standing over
+nothing; the player is not offered a sign-in they have already done.
+
+Asking the question at all needs the `<queries>` block in `AndroidManifest.xml`: from Android 11 a
+package is invisible unless declared, and the Play Games SDK's own manifest declares only
+`com.google.android.gms` and `com.android.vending`.
+
+Reproduce either state on an emulator by forcing the gate in `SettingsScreen` — the Play Store
+system images do not carry the Play Games app, so "signed in, no app" is the default there once
+`authenticated` is forced true.
+
 ### "The Achievements button does nothing"
 
 It is never a dead control: every path through it now ends in either the Play Games UI or a line the
@@ -439,9 +461,11 @@ player can read, and in a log line under `PlayGames`. Work through it in this or
 
 1. **`adb logcat -s PlayGames`, then press it.** One line names the cause, and the rest of this list is
    only for reading that line.
-2. **Nothing in the log at all** — the press never reached Play Games. The control is only on screen when
-   `isAuthenticated()` has answered true, so this is the odd one; check the tap landed (Home's chip shares
-   its row with *Leaderboard*).
+2. **Nothing in the log at all** — either the press never reached Play Games, or the Task was *cancelled*.
+   A `Task` has three terminal states and the success/failure pair covers two: a cancelled one used to fire
+   neither listener, which is silence by construction. `openAchievements` now uses a complete listener and
+   logs all three, so a genuinely empty log means the press did not land — check it (Home's chip shares its
+   row with *Leaderboard*).
 3. **"Achievements UI unavailable"** — Play Games declined to build the Intent. The line after it is an
    `ApiException` whose number is the answer; it is a `CommonStatusCodes` value, and **4 is
    `SIGN_IN_REQUIRED`**, which is what a lapsed or never-completed Play Games sign-in looks like. Verified
