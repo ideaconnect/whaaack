@@ -5,5 +5,5 @@ split-screen pane and at large system font sizes.
 
 Fixed a dialog whose button could sit off the bottom of the screen at large font sizes.
 
-Achievements now appear only when Play Games has actually signed you in, and say what
-went wrong instead of doing nothing.
+Achievements now appear only when Play Games can actually show them — signed in, with
+the Google Play Games app installed — instead of a button that did nothing.
