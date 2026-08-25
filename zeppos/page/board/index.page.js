@@ -38,6 +38,19 @@ let message = null
 let scope = SCOPE_ALL_TIME
 
 /**
+ * False once this page has been torn down.
+ *
+ * A board request is a live HTTP round trip through the phone, and the promise that
+ * resolves it belongs to the *app*, not to the page — ZML's `onDestroy` unsubscribes the
+ * message handlers but cannot cancel a call already in flight, and the reply can land up
+ * to a minute later. Widgets in Zepp OS attach to whatever page is in front when
+ * `createWidget` runs, not to the page whose closure asked for them, so a reply arriving
+ * after a back-swipe would draw a leaderboard over the home menu. Every callback here
+ * checks this first.
+ */
+let alive = false
+
+/**
  * The Zepp edition's own board.
  *
  * It is not the phone game's board and never shares a row with it: a 3x3 grid tapped with
@@ -52,6 +65,9 @@ let scope = SCOPE_ALL_TIME
 Page(
   BasePage({
     build() {
+      alive = true
+      list = null
+      scope = SCOPE_ALL_TIME
       ground()
 
       text({
@@ -98,6 +114,13 @@ Page(
       this.load()
     },
 
+    onDestroy() {
+      alive = false
+      // Not `discardList()`: the page is going away and takes its widgets with it, and
+      // deleting one during teardown is asking the runtime to free something twice.
+      list = null
+    },
+
     toggleScope() {
       scope = scope === SCOPE_ALL_TIME ? SCOPE_WEEKLY : SCOPE_ALL_TIME
       scopeButton.setProperty(
@@ -116,13 +139,14 @@ Page(
 
       this.request({ method: REQ_BOARD, params: { scope } })
         .then((data) => {
-          // The player can flip the scope while a slower request is still in flight;
-          // answering the wrong question is worse than answering none.
-          if (asked !== scope) return
+          // Two ways this answer can be stale: the page is gone, or the player flipped
+          // the scope while it was in flight. Answering the wrong question is worse than
+          // answering none, and drawing on a page that no longer exists is worse still.
+          if (!alive || asked !== scope) return
           this.render(data || {})
         })
         .catch(() => {
-          if (asked !== scope) return
+          if (!alive || asked !== scope) return
           setText(message, getText('phoneUnreachable'))
           show(message, true)
         })

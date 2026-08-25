@@ -173,9 +173,20 @@ export function createBackend({ url, anonKey, fetch, storage }) {
     })
 
     if (result.status < 200 || result.status >= 300) {
-      // 400 with `invalid_credentials` is by far the common case and deserves plain
-      // words; anything else is reported as the server described it.
       const code = result.body && (result.body.error_code || result.body.error)
+
+      // An address that exists but has never been confirmed also answers 400, and telling
+      // that player their password is wrong is the worst thing this page can say: it is
+      // false, and it sends somebody who has just registered back round the signup form.
+      // Send them to the inbox they are actually waiting on.
+      if (code === 'email_not_confirmed') {
+        setStatus({ state: AUTH_CONFIRM, email })
+        return { signedIn: false, unconfirmed: true }
+      }
+
+      // `invalid_credentials` is by far the commonest case and deserves plain words;
+      // anything else is reported as GoTrue described it, since its messages are written
+      // for people rather than for a schema.
       const message =
         code === 'invalid_credentials' || result.status === 400
           ? 'That email and password do not match an account.'
@@ -329,6 +340,23 @@ export function createBackend({ url, anonKey, fetch, storage }) {
       // session is deliberately left alone.
       throw new Error('The sign-in service returned a response with no session in it.')
     }
+
+    // Never resurrect a session that was signed out while this was on the wire.
+    //
+    // The two are genuinely concurrent: `onRequest` fires `spendPendingRequest()` without
+    // awaiting it and then starts the authorized call in the same turn, so a Sign out
+    // queued on the phone and a refresh driven by the watch interleave at the `fetch`
+    // suspension point. Writing unconditionally puts a freshly minted access token back
+    // into a store the player just emptied — and a JWT is not revoked server-side, so it
+    // stays good for its full hour. The watch would go on showing them signed in, and
+    // submitting every later run to the account they had just left.
+    //
+    // The refresh token is the identity check: this save is only valid as the successor of
+    // the exact session that was spent to mint it. The phone client carries the same guard
+    // and the same reasoning (SupabaseClient.refreshSession).
+    const current = loadSession()
+    if (!current || current.refreshToken !== session.refreshToken) return null
+
     writeJson(KEY_SESSION, next)
     return next
   }
@@ -364,7 +392,11 @@ export function createBackend({ url, anonKey, fetch, storage }) {
       body: { p_scope: scope || SCOPE_ALL_TIME, p_limit: BOARD_LIMIT },
     })
     if (rows.status < 200 || rows.status >= 300) {
-      throw new Error(errorMessage(rows, 'The leaderboard is not answering right now.'))
+      // Deliberately not `errorMessage`: a PostgREST failure here names our functions and
+      // tables, and none of that is a sentence to put on somebody's wrist. It is logged
+      // instead, where a developer can find it and a player cannot.
+      console.log('zepp board failed: ' + rows.status + ' ' + JSON.stringify(rows.body))
+      throw new Error('The leaderboard is not answering right now.')
     }
 
     const rankings = (Array.isArray(rows.body) ? rows.body : []).map((row) => ({
@@ -414,13 +446,33 @@ export function createBackend({ url, anonKey, fetch, storage }) {
 
     if (result.unauthenticated) return { saved: false, reason: 'signed_out' }
     if (result.status < 200 || result.status >= 300) {
-      return {
-        saved: false,
-        reason: 'rejected',
-        message: errorMessage(result, 'The server would not record that run.'),
-      }
+      return { saved: false, reason: 'rejected', message: refusalMessage(result) }
     }
     return { saved: true }
+  }
+
+  /**
+   * What to tell a player whose run the server would not take.
+   *
+   * Never the server's own words, with one exception. A plausibility constraint arrives as
+   * `new row for relation "zepp_scores" violates check constraint "zepp_scores_hits_floor"`
+   * — which names our schema, blames the player for nothing they can act on, and does not
+   * even say what was wrong. The phone client made the same call for the same reason and
+   * replaces every submission failure wholesale.
+   *
+   * The exception is the flood stop, which is the one refusal the migration wrote a
+   * sentence for: `raise exception 'score_rate_limited' using hint = '...'`. PostgREST puts
+   * the exception name in `message` and the sentence in `hint`, so taking `message` first —
+   * as the generic error reader does — would print the internal name and throw away the
+   * only human-readable thing in the envelope.
+   */
+  function refusalMessage(result) {
+    const body = (result && result.body) || {}
+    console.log('zepp submit refused: ' + result.status + ' ' + JSON.stringify(body))
+    if (body.message === 'score_rate_limited') {
+      return body.hint || 'Too many runs at once — give it a minute.'
+    }
+    return "That run couldn't be recorded on the leaderboard."
   }
 
   /**

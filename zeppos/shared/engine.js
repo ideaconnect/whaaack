@@ -67,8 +67,10 @@ const LEVEL_STEP_MS = 4000
 //   level 30   (120s)  5 slots   4.94/s
 //   level 45   (180s)  5 slots   5.64/s
 //
-// A casual run therefore ends somewhere in the first minute and an expert's in the
-// third, which is the spread the leaderboard needs in order to rank anything.
+// Against synthetic players held to exactly those rates (tools/simulate.mjs), a casual
+// run ends around 38s and an expert's around four minutes — a spread of better than six
+// to one, which is what the leaderboard needs in order to rank anything, and none of them
+// runs for ever.
 const START_INTERVAL_MS = 900
 const KNEE_INTERVAL_MS = 560
 const FLOOR_INTERVAL_MS = 220
@@ -118,6 +120,18 @@ export const HIT_FLASH_MS = 220
 
 /** Remaining fraction of its life at which a fruit's tile starts warning. */
 export const WARN_FRACTION = 0.38
+
+/**
+ * The most a single tick may advance the run by. Anything past this is a clock step, not
+ * elapsed time, and is absorbed rather than played (see `syncClock`).
+ *
+ * The page ticks every 40ms, so a second is twenty-five frames of slack: enough that a
+ * slow frame, a garbage collection or a busy side service never trips it, tight enough
+ * that a real correction is caught on the tick it arrives. A tick that genuinely took
+ * longer than this loses the excess, which costs the player a little score — the safe
+ * direction, and the one the alternative does not have.
+ */
+export const MAX_TICK_MS = 1000
 
 export const FRUITS = [
   'apple',
@@ -222,6 +236,52 @@ export function createEngine(random) {
   let lastSpawnMs = 0
   const nextSpawnMs = new Array(MAX_TARGETS).fill(0)
 
+  /** The clock reading the last call saw, so the next one can measure the step. */
+  let lastNow = 0
+
+  /**
+   * Absorbs a jump in the clock, so the run neither gains nor loses time across one.
+   *
+   * The page drives this engine from `Date.now()`, because a watch offers nothing else —
+   * there is no monotonic counter in the Zepp OS API, and the wall clock is resynced from
+   * the phone whenever the two are in touch. So a correction of any size can land between
+   * two ticks, and every deadline a run holds is an absolute reading of that same clock.
+   *
+   * Left alone it is wrong in both directions. Forward, the gap is banked as score: a
+   * ninety-second correction is ninety seconds the player never played, added to the run
+   * and then to the board. Backward, the run freezes — every deadline is suddenly in the
+   * future, so nothing spawns, nothing expires, and the fruit already on the board can be
+   * whacked at no risk until the clock catches up.
+   *
+   * The cure is the one the phone engine already applies when it resumes from a pause
+   * (`GameEngine.resume`, which shifts every deadline by the time spent away): move the
+   * whole run with the clock rather than trying to reconcile it afterwards. A step costs
+   * one tick's worth of play and nothing else.
+   */
+  function syncClock(now) {
+    if (lastNow === 0) {
+      lastNow = now
+      return
+    }
+    const delta = now - lastNow
+    lastNow = now
+    const jump = delta - Math.max(0, Math.min(delta, MAX_TICK_MS))
+    if (jump === 0) return
+
+    startMs += jump
+    countdownEndsMs += jump
+    // Zero means "never happened", so it must not be shifted into meaning something.
+    if (lastSpawnMs !== 0) lastSpawnMs += jump
+    for (let i = 0; i < nextSpawnMs.length; i++) nextSpawnMs[i] += jump
+    for (let i = 0; i < engine.slots.length; i++) {
+      const active = engine.slots[i]
+      if (active) active.bornMs += jump
+    }
+    for (let i = 0; i < engine.clearedAt.length; i++) {
+      if (engine.clearedAt[i] !== 0) engine.clearedAt[i] += jump
+    }
+  }
+
   function start(now) {
     engine.phase = PHASE_COUNTDOWN
     engine.elapsedMs = 0
@@ -236,9 +296,11 @@ export function createEngine(random) {
     openTargets = BASE_TARGETS
     lastSpawnMs = 0
     nextSpawnMs.fill(0)
+    lastNow = now
   }
 
   function update(now) {
+    syncClock(now)
     if (engine.phase === PHASE_COUNTDOWN) {
       const remaining = countdownEndsMs - now
       engine.countdownValue = Math.max(0, Math.ceil(remaining / 1000))
@@ -380,6 +442,9 @@ export function createEngine(random) {
 
   /** Applies a tap on `tile`. Returns true when it landed on fruit. */
   function tap(tile, now) {
+    // A tap arrives between ticks and stamps `clearedAt`, so it has to see the same
+    // corrected clock the tick will; otherwise a step landing mid-tap is applied twice.
+    syncClock(now)
     if (engine.phase !== PHASE_RUNNING) return false
     for (let i = 0; i < engine.slots.length; i++) {
       const active = engine.slots[i]
@@ -395,6 +460,7 @@ export function createEngine(random) {
 
   /** Ends the run the player is leaving. The score still stands: they survived it. */
   function quitRun(now) {
+    syncClock(now)
     if (engine.phase !== PHASE_RUNNING && engine.phase !== PHASE_COUNTDOWN) return
     finish(now, true)
   }

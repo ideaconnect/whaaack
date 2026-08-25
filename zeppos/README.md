@@ -101,15 +101,20 @@ node tools/simulate.mjs 40
 
 ```
 grade    median      p10       p90      max   hits/s  capped
-casual     32.8s   29.4s   35.2s   36.8s    1.84       0
-decent     57.4s   55.4s   59.7s   61.8s    2.81       0
-good       81.2s   78.1s   83.1s   87.3s    3.71       0
-expert    151.8s  148.9s  156.5s  158.5s    4.64       0
+casual     37.6s   34.6s   40.0s   41.7s    1.96       0
+decent     61.3s   58.4s   65.1s   70.6s    2.92       0
+good      102.9s   95.0s  108.2s  110.2s    4.09       0
+expert    245.4s  241.9s  251.8s  255.6s    5.65       0
 ```
 
-Four grades of synthetic player, separated by a factor of nearly five, and none of them
-reaches the 15-minute cap. Those are the two properties the curve has to have: a board that
-ranks skill rather than patience, and runs that terminate.
+Four grades of synthetic player, separated by better than six to one, each landing within a
+few percent of the tap rate it is supposed to hold, and none of them reaching the 15-minute
+cap. Those are the properties the curve has to have: a board that ranks skill rather than
+patience, and runs that terminate.
+
+Alongside it, `node tools/check-engine.mjs` asserts the things a play-through would not
+catch — chiefly what happens when the clock steps, which on a watch it does: `Date.now()`
+is resynced from the phone and there is no monotonic counter to use instead.
 
 ## How it draws
 

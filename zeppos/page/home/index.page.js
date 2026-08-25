@@ -24,6 +24,9 @@ const ACCOUNT_X = px(84)
 let bestLabel = null
 let accountLabel = null
 
+/** False once the page is gone; the account lookup is a round trip to the phone. */
+let alive = false
+
 /**
  * The menu.
  *
@@ -36,6 +39,7 @@ let accountLabel = null
 Page(
   BasePage({
     build() {
+      alive = true
       ground()
 
       text({
@@ -89,6 +93,10 @@ Page(
       this.refreshAccount()
     },
 
+    onDestroy() {
+      alive = false
+    },
+
     onResume() {
       // Coming back from a run: the best may have moved, and a sign-in may have happened
       // on the phone while the watch was showing something else.
@@ -99,6 +107,7 @@ Page(
     refreshAccount() {
       this.request({ method: REQ_AUTH })
         .then((data) => {
+          if (!alive) return
           setText(
             accountLabel,
             data && data.signedIn
@@ -106,7 +115,10 @@ Page(
               : getText('signInHint'),
           )
         })
-        .catch(() => setText(accountLabel, getText('phoneUnreachable')))
+        .catch(() => {
+          if (!alive) return
+          setText(accountLabel, getText('phoneUnreachable'))
+        })
     },
   }),
 )

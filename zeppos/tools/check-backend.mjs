@@ -179,9 +179,20 @@ async function main() {
   check('the board now has the run', board.rows.length > 0, `${board.rows.length} rows`)
   check('and a standing for this player', board.me !== null, board.me ? `rank ${board.me.rank} of ${board.me.totalPlayers}` : '')
 
-  // The plausibility constraints have to actually refuse an impossible run.
+  // The plausibility constraints have to actually refuse an impossible run...
   const tooManyHits = await api.submit(1000, 5000)
   check('an impossible hit count is refused', tooManyHits.saved === false, tooManyHits.message || '')
+
+  // ...and the refusal must not arrive as the constraint's own name. Postgres answers a
+  // 23514 with `new row for relation "zepp_scores" violates check constraint
+  // "zepp_scores_hits_floor"`, which names our schema and tells a player nothing they can
+  // act on. Whatever reaches the watch has to be a sentence written for them.
+  const leaked = /relation|constraint|zepp_scores|violates|null value|PGRST|P0001/i
+  check(
+    'and does not name our schema on the way back',
+    !leaked.test(tooManyHits.message || ''),
+    tooManyHits.message,
+  )
 
   await api.signOut()
   check('sign-out clears the session', api.authSnapshot().signedIn === false)

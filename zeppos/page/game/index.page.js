@@ -60,7 +60,11 @@ import { ground, text, button, rect, circle, image, show, setText, setColor, set
 /** 25fps. Fast enough that a 460ms fruit gets a dozen frames; slow enough to stay cool. */
 const TICK_MS = 40
 
-/** Runs are minutes at most, and the screen must not drop out in the middle of one. */
+/**
+ * How long the page keeps the screen lit. Unlike the drop-wrist arm below, this is a page
+ * *timeout* rather than a countdown from one moment, so it covers a visit of several runs
+ * rather than one, and it is reset when the page is destroyed.
+ */
 const AWAKE_MS = 600000
 
 const FRUIT_INSET = tileInset(FRUIT)
@@ -131,9 +135,17 @@ const shown = {
 let ticker = null
 let submitted = false
 
+/**
+ * False once the page is gone. The score submission is a round trip through the phone and
+ * its reply can land long after a back-swipe; a widget handle from a torn-down page still
+ * passes the `if (widget)` check in `setText`, so the guard has to be explicit.
+ */
+let alive = false
+
 Page(
   BasePage({
     build() {
+      alive = true
       view.pips = []
       view.tiles = []
       view.fruits = []
@@ -147,7 +159,13 @@ Page(
       buildResult(this)
 
       setPageBrightTime({ brightTime: AWAKE_MS })
-      pauseDropWristScreenOff({ duration: AWAKE_MS })
+      // `duration: 0` means "until resetDropWristScreenOff", which `onDestroy` already
+      // calls. A finite duration would be a countdown from this moment rather than a
+      // per-run guarantee: several runs and their result screens easily outlast one, and
+      // the arm would lapse mid-run — the display blanking while the ticker keeps going,
+      // so fruit expire unseen and the player is handed the result of a run they could
+      // not watch.
+      pauseDropWristScreenOff({ duration: 0 })
 
       // A run in progress swallows Back and ends the run instead; a second Back then
       // leaves, because by that point there is nothing to protect. The same rule for the
@@ -165,6 +183,7 @@ Page(
     },
 
     onDestroy() {
+      alive = false
       stopTicker()
       offGesture()
       offKey()
@@ -270,6 +289,7 @@ Page(
 
       this.request({ method: REQ_SUBMIT, params: { millis, hits } })
         .then((data) => {
+          if (!alive) return
           if (data && data.saved) {
             setText(view.result.status, getText('saved'))
             setColor(view.result.status, SUCCESS)
@@ -285,6 +305,7 @@ Page(
           setColor(view.result.status, CREAM_FAINT)
         })
         .catch(() => {
+          if (!alive) return
           setText(view.result.status, getText('phoneUnreachable'))
           setColor(view.result.status, CREAM_FAINT)
         })

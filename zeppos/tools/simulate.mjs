@@ -48,7 +48,13 @@ function playOne(grade, seed, capMs) {
 
   let now = 0
   const minGapMs = 1000 / grade.rate
-  let lastTapAt = -Infinity
+  // The next moment this player may tap, carried forward by whole intervals rather than
+  // reset to `now`. The loop only ever sees multiples of TICK_MS, so resetting would round
+  // every gap *up* to the next tick and quietly cap the grade below its stated rate — at
+  // 6/s the first permissible delta is 200ms, which is 5/s, and the expert grade exists
+  // precisely to probe the band above 5/s. Carrying the debt lets the average converge on
+  // the nominal rate instead.
+  let nextTapAt = -Infinity
 
   engine.start(now)
   while (engine.phase !== PHASE_OVER && now < capMs) {
@@ -59,7 +65,7 @@ function playOne(grade, seed, capMs) {
     // Go for the fruit closest to expiring that this player could have reacted to. A real
     // player is not this well informed, but being wrong the other way - picking at random
     // - would measure the picker rather than the curve.
-    if (now - lastTapAt < minGapMs) continue
+    if (now < nextTapAt) continue
 
     let target = null
     let leastLeft = Infinity
@@ -74,7 +80,9 @@ function playOne(grade, seed, capMs) {
     }
     if (target) {
       engine.tap(target.tile, now)
-      lastTapAt = now
+      // Never bank more than one interval of credit: a player who had nothing to hit for
+      // ten seconds does not then get to fire ten seconds' worth of taps at once.
+      nextTapAt = Math.max(nextTapAt, now - minGapMs) + minGapMs
     }
   }
 
