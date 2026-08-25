@@ -1,0 +1,77 @@
+msgid "title"
+msgstr "Whaaack!"
+
+msgid "subtitle"
+msgstr "Sign in to rank your watch runs on the Zepp leaderboard."
+
+msgid "subtitleSignUp"
+msgstr "One account for the watch and the phone game. The name you choose is the one on the board."
+
+msgid "subtitleSignedIn"
+msgstr "Your watch runs are being recorded on the Zepp leaderboard."
+
+msgid "subtitleConfirm"
+msgstr "Almost there — the address needs confirming before you can sign in."
+
+msgid "signedInAs"
+msgstr "Signed in as"
+
+msgid "player"
+msgstr "Player"
+
+msgid "signedInHint"
+msgstr "Runs finished on your watch are now recorded on the Zepp board. It is separate from the phone game's board: a 3x3 grid tapped with one finger is not the same game as a 4x4 one."
+
+msgid "signOut"
+msgstr "Sign out"
+
+msgid "displayName"
+msgstr "Display name"
+
+msgid "displayNamePlaceholder"
+msgstr "The name on the board"
+
+msgid "email"
+msgstr "Email"
+
+msgid "password"
+msgstr "Password"
+
+msgid "passwordVisible"
+msgstr "The Settings API has no masked field, so your password is readable while you type it. It is cleared the moment you press the button, and is never stored."
+
+msgid "signIn"
+msgstr "Sign in"
+
+msgid "createAccount"
+msgstr "Create account"
+
+msgid "working"
+msgstr "Working…"
+
+msgid "bothFields"
+msgstr "Enter both an email address and a password."
+
+msgid "nameNeeded"
+msgstr "Choose a display name — it is the name that appears on the board."
+
+msgid "noAccount"
+msgstr "No account yet? One account covers the watch and the phone game."
+
+msgid "haveAccount"
+msgstr "Already have an account, here or in the phone game?"
+
+msgid "switchToSignUp"
+msgstr "Create an account"
+
+msgid "switchToSignIn"
+msgstr "Sign in instead"
+
+msgid "confirmTitle"
+msgstr "Check your inbox"
+
+msgid "confirmBody"
+msgstr "We sent a link to confirm the address. Open it, then come back here and sign in with the password you just chose."
+
+msgid "backToSignIn"
+msgstr "Sign in"

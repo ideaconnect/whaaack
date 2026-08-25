@@ -1,0 +1,80 @@
+msgid "appName"
+msgstr "Whaaack!"
+
+msgid "tagline"
+msgstr "3x3 · Zepp edition"
+
+msgid "play"
+msgstr "Play"
+
+msgid "leaderboard"
+msgstr "Leaderboard"
+
+msgid "best"
+msgstr "Best "
+
+msgid "noRunsYet"
+msgstr "No runs yet"
+
+msgid "newBest"
+msgstr "New best!"
+
+msgid "signedInAs"
+msgstr "Signed in as "
+
+msgid "player"
+msgstr "Player"
+
+msgid "signInHint"
+msgstr "Sign in via the Zepp app to rank your runs."
+
+msgid "phoneUnreachable"
+msgstr "No connection to your phone."
+
+msgid "whaaacked"
+msgstr "Whaaacked!"
+
+msgid "runEnded"
+msgstr "Run ended"
+
+msgid "msAnd"
+msgstr " ms · "
+
+msgid "hits"
+msgstr " hits"
+
+msgid "playAgain"
+msgstr "Play again"
+
+msgid "saving"
+msgstr "Saving…"
+
+msgid "saved"
+msgstr "Saved to the board"
+
+msgid "notSaved"
+msgstr "Not saved to the board."
+
+msgid "signInToRank"
+msgstr "Sign in on your phone to rank."
+
+msgid "allTime"
+msgstr "All time"
+
+msgid "thisWeek"
+msgstr "This week"
+
+msgid "loading"
+msgstr "Loading…"
+
+msgid "boardEmpty"
+msgstr "Nobody has posted a run yet. Be first."
+
+msgid "you"
+msgstr "You: "
+
+msgid "ofPlayers"
+msgstr " of "
+
+msgid "noRankedRun"
+msgstr "No ranked run yet."

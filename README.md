@@ -8,6 +8,9 @@ longer you last.
 
 Android · Kotlin · Jetpack Compose · Supabase · AdMob
 
+There is also a **[Zepp OS edition](zeppos/)** for Amazfit watches — 3x3 instead of 4x4,
+one finger instead of two thumbs, and a leaderboard of its own.
+
 ---
 
 ## How it renders
@@ -90,6 +93,11 @@ app/src/main/java/tech/idct/whaaack/
   audio/    SoundPool effects + MediaPlayer music
   ads/      AdMob interstitial, UMP consent
   billing/  the one-time ad-free unlock (Play Billing)
+zeppos/         the Zepp OS watch edition (see its own README)
+  shared/       engine, layout, Supabase client - none of it imports @zos
+  page/         home, game, board
+  app-side/     the phone-side service: all networking, holds the session
+  setting/      sign in or create an account, rendered by the Zepp app
 supabase/
   migrations/   schema, RLS, leaderboard functions
   config.toml   remote auth settings
