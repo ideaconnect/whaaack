@@ -28,6 +28,8 @@ tools/pro-badge-preview.png
 tools/achievements-preview.png
 # Regenerate with: python tools/generate_stat_icons.py --preview
 tools/stat-icons-preview.png
+# Regenerate with: python tools/generate_social_cards.py --preview
+tools/social-preview.png
 tools/__pycache__/
 
 # The Game Stats upload bundle: a zip of files that are themselves committed beside it.
