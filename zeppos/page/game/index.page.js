@@ -4,7 +4,12 @@ import { getText } from '@zos/i18n'
 import { localStorage } from '@zos/storage'
 import { setPageBrightTime, resetPageBrightTime, pauseDropWristScreenOff, resetDropWristScreenOff } from '@zos/display'
 import { onGesture, offGesture, onKey, offKey, GESTURE_RIGHT, KEY_BACK, KEY_EVENT_CLICK } from '@zos/interaction'
-import { Vibrator, VIBRATOR_SCENE_SHORT_STRONG, VIBRATOR_SCENE_DURATION } from '@zos/sensor'
+import {
+  Vibrator,
+  VIBRATOR_SCENE_SHORT_LIGHT,
+  VIBRATOR_SCENE_SHORT_STRONG,
+  VIBRATOR_SCENE_DURATION,
+} from '@zos/sensor'
 import { BasePage } from '@zeppos/zml/base-page'
 
 import {
@@ -159,6 +164,77 @@ const SPLAT_HOLD_MS = SPLAT_LIFE_MS * SPLAT_HOLD
 const engine = createEngine()
 const vibrator = new Vibrator()
 
+/**
+ * What the motor says, and why it is three things rather than one.
+ *
+ * This is the whole of the game's feedback now that it makes no sound, so the three events
+ * a run can produce have to be told apart by feel alone, in the dark, through a strap:
+ *
+ *   a hit      SHORT_LIGHT    a tick. Happens up to five times a second at the top of the
+ *                             curve, so it has to be the smallest thing the motor can do -
+ *                             a strong buzz at that rate is one continuous blur, and an
+ *                             arm that is always buzzing tells you nothing.
+ *   a miss     SHORT_STRONG   a knock. Three of these end the run, so it has to cut through
+ *                             the ticking and be unmistakable when it lands.
+ *   the end    DURATION       a hold. Longest of the three, and the only one that lasts.
+ *
+ * The ordering matters more than the exact scenes: light, strong, sustained. A player
+ * should be able to tell a strike from a hit without looking, which is the point of having
+ * any of this on a watch.
+ */
+
+/**
+ * A hit will not re-fire the motor sooner than this.
+ *
+ * Two taps on two tiles cannot land 55ms apart on a wrist, so in a real run this never
+ * fires. It is here because restarting the motor faster than it can finish a pulse gives a
+ * continuous hum rather than a series of ticks, and one bad frame should not be able to
+ * cause that.
+ */
+const HIT_MIN_GAP_MS = 55
+
+/**
+ * How long a strike keeps the motor to itself.
+ *
+ * A miss and a hit can land in the same handful of milliseconds - the fruit that escaped
+ * and the one just whacked are independent - and a light tick starting on top of the knock
+ * would cut it short, so the strike would be felt as something smaller than it is. The
+ * strike is the more important of the two: it is a third of the run.
+ */
+const MISS_HOLDS_MOTOR_MS = 200
+
+let lastHitBuzzMs = 0
+let motorHeldUntil = 0
+
+function buzz(mode) {
+  // Stopped first: setting a mode on a motor that is mid-pulse does not reliably take, and
+  // the two loud signals are both overriding something quieter by design.
+  vibrator.stop()
+  vibrator.setMode(mode)
+  vibrator.start()
+}
+
+/** A whack landed. */
+function buzzHit(now) {
+  if (now < motorHeldUntil) return
+  if (now - lastHitBuzzMs < HIT_MIN_GAP_MS) return
+  lastHitBuzzMs = now
+  vibrator.setMode(VIBRATOR_SCENE_SHORT_LIGHT)
+  vibrator.start()
+}
+
+/** One got away. */
+function buzzMiss(now) {
+  motorHeldUntil = now + MISS_HOLDS_MOTOR_MS
+  buzz(VIBRATOR_SCENE_SHORT_STRONG)
+}
+
+/** That was the run. */
+function buzzOver() {
+  motorHeldUntil = 0
+  buzz(VIBRATOR_SCENE_DURATION)
+}
+
 const view = {
   clock: null,
   pips: [],
@@ -244,6 +320,9 @@ Page(
       offKey()
       resetPageBrightTime()
       resetDropWristScreenOff()
+      // The end-of-run buzz is the long one, and a player who walks straight out of the
+      // result screen leaves while it is still going - into whatever the watch shows next.
+      vibrator.stop()
     },
 
     startRun() {
@@ -263,10 +342,7 @@ Page(
 
       engine.update(now)
 
-      if (engine.strikes > strikesBefore) {
-        vibrator.setMode(VIBRATOR_SCENE_SHORT_STRONG)
-        vibrator.start()
-      }
+      if (engine.strikes > strikesBefore) buzzMiss(now)
 
       if (engine.phase === PHASE_OVER) {
         stopTicker()
@@ -281,7 +357,11 @@ Page(
       if (engine.phase !== PHASE_RUNNING) return
       const now = Date.now()
       if (!engine.tap(tile, now)) return
+      // Rendered before the buzz, because the splat is the feedback that has to be
+      // immediate and the motor is a call into a driver: a slow one must not hold up the
+      // frame that shows the hit landed.
       renderFrame(now)
+      buzzHit(now)
     },
 
     /**
@@ -306,8 +386,7 @@ Page(
       const isBest = millis > previousBest
       if (isBest) localStorage.setItem(LOCAL_BEST, millis)
 
-      vibrator.setMode(VIBRATOR_SCENE_DURATION)
-      vibrator.start()
+      buzzOver()
 
       showBoard(false)
       showResult(true)

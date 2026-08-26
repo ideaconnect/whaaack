@@ -323,9 +323,25 @@ y=412, where its far corner is 235px from the centre and the rim is at 240.
 
 ## Why there is no sound
 
-There was, three times over, and it was bad every time. The watch is silent now and a hit
-answers with the vibration motor instead (`VIBRATOR_SCENE_SHORT_STRONG`, on the game page),
-which is the feedback that survived.
+There was, three times over, and it was bad every time. The watch is silent now and the
+vibration motor carries the whole of the feedback instead, which is the part that survived
+and the part that works on something strapped to a wrist.
+
+It speaks in three levels, because a run produces three events that have to be told apart
+by feel alone, in the dark, without looking:
+
+| | | |
+|---|---|---|
+| a hit | `SHORT_LIGHT` | a tick — up to five a second, so it has to be the smallest thing the motor can do |
+| a miss | `SHORT_STRONG` | a knock — three of these end the run, so it has to cut through the ticking |
+| the end | `DURATION` | a hold — the longest, and the only one that lasts |
+
+The ordering matters more than the exact scenes: light, strong, sustained. A strike keeps
+the motor to itself for 200ms so that a hit landing in the same breath cannot cut the knock
+short and make a third of the run feel like a tick, and hits will not re-fire the motor
+inside 55ms — faster than it can finish a pulse is a continuous hum rather than a series of
+taps. Leaving the page stops it, since the end-of-run buzz outlasts the screen it belongs
+to.
 
 Worth writing down, because the next person to reach for `@zos/media` should know what is
 waiting:
