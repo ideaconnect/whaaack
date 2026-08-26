@@ -4,12 +4,7 @@ import { getText } from '@zos/i18n'
 import { localStorage } from '@zos/storage'
 import { setPageBrightTime, resetPageBrightTime, pauseDropWristScreenOff, resetDropWristScreenOff } from '@zos/display'
 import { onGesture, offGesture, onKey, offKey, GESTURE_RIGHT, KEY_BACK, KEY_EVENT_CLICK } from '@zos/interaction'
-import {
-  Vibrator,
-  VIBRATOR_SCENE_SHORT_MIDDLE,
-  VIBRATOR_SCENE_DURATION,
-  VIBRATOR_SCENE_STRONG_REMINDER,
-} from '@zos/sensor'
+import { Vibrator, VIBRATOR_SCENE_SHORT_LIGHT, VIBRATOR_SCENE_DURATION } from '@zos/sensor'
 import { BasePage } from '@zeppos/zml/base-page'
 
 import {
@@ -165,32 +160,29 @@ const engine = createEngine()
 const vibrator = new Vibrator()
 
 /**
- * What the motor says, and why it is three things rather than one.
+ * What the motor says. Two things, and the run ending is not one of them.
  *
- * This is the whole of the game's feedback now that it makes no sound, so the three events
- * a run can produce have to be told apart by feel alone, in the dark, through a strap:
+ *   a hit    SHORT_LIGHT   one tap, 20ms - the lightest thing the motor can do. It happens
+ *                          up to five times a second at the top of the curve, so it has to
+ *                          be over before the next one and it has to stay out of the way.
+ *   a miss   DURATION      600ms held. Deeper by being *longer*, which is the only way
+ *                          this API has of being deeper: the three short scenes are all
+ *                          20ms and differ only in strength, so strength alone would make
+ *                          a strike feel like a firmer hit rather than a different event.
  *
- *   a hit      SHORT_MIDDLE      one tap, 20ms. It happens up to five times a second at
- *                                the top of the curve, so it has to be over before the
- *                                next one - anything longer runs into its successor and
- *                                the whole run feels like one hum. Medium rather than
- *                                light because it is the signal that has to survive a
- *                                moving arm; light is 20ms of almost nothing.
- *   a miss     DURATION          600ms held. Not a harder tap - a *longer* one, which is
- *                                the only way this API has of sounding deeper: the three
- *                                short scenes differ in strength and are all 20ms, so
- *                                strength alone would make a strike feel like a firmer
- *                                version of a hit rather than a different kind of event.
- *   the end    STRONG_REMINDER   four pulses over 1200ms. A pattern, not a length, because
- *                                the end follows a strike immediately and "the same buzz
- *                                but longer" is not something anybody can time.
+ * Nothing marks the end of the run. It was four pulses over 1200ms, which is a long time
+ * to be buzzed at about something the screen has already said, and it landed immediately
+ * after the strike that caused it - so the last thing a run did was talk over itself.
  *
- * So the three differ in kind and not in degree: a tap, a hold, a pattern. That is what
- * makes a strike tellable from a hit without looking, which is the point of having any of
- * this on a watch.
+ * `stop()` is deliberately not called before starting either of these. It was, on the
+ * miss, on the theory that a mode set mid-pulse might not take - and the miss came out
+ * *delicate* while the hit, which never stopped anything, came out solid. Stopping the
+ * motor and immediately restarting it appears to swallow the start, which is the same
+ * shape of trap as `stop()` unloading the media player: the call that looks like it makes
+ * the next one reliable is the one that loses it.
  *
- * DURATION and STRONG_REMINDER stop on their own. VIBRATOR_SCENE_CALL and _TIMER are the
- * two that run until `stop()` is called, and neither belongs in a game.
+ * DURATION stops on its own after 600ms. VIBRATOR_SCENE_CALL and _TIMER are the two that
+ * run until `stop()` is called, and neither belongs in a game.
  */
 
 /**
@@ -220,9 +212,6 @@ let lastHitBuzzMs = 0
 let motorHeldUntil = 0
 
 function buzz(mode) {
-  // Stopped first: setting a mode on a motor that is mid-pulse does not reliably take, and
-  // the two loud signals are both overriding something quieter by design.
-  vibrator.stop()
   vibrator.setMode(mode)
   vibrator.start()
 }
@@ -232,23 +221,13 @@ function buzzHit(now) {
   if (now < motorHeldUntil) return
   if (now - lastHitBuzzMs < HIT_MIN_GAP_MS) return
   lastHitBuzzMs = now
-  // No `stop()` first, unlike the two below: this is the quiet one and it overrides
-  // nothing. Stopping a motor that is not running to start a 20ms pulse is a way to lose
-  // the pulse.
-  vibrator.setMode(VIBRATOR_SCENE_SHORT_MIDDLE)
-  vibrator.start()
+  buzz(VIBRATOR_SCENE_SHORT_LIGHT)
 }
 
 /** One got away: deeper, by being longer. */
 function buzzMiss(now) {
   motorHeldUntil = now + MISS_HOLDS_MOTOR_MS
   buzz(VIBRATOR_SCENE_DURATION)
-}
-
-/** That was the run. */
-function buzzOver() {
-  motorHeldUntil = 0
-  buzz(VIBRATOR_SCENE_STRONG_REMINDER)
 }
 
 const view = {
@@ -401,8 +380,6 @@ Page(
       const previousBest = Number(localStorage.getItem(LOCAL_BEST, 0)) || 0
       const isBest = millis > previousBest
       if (isBest) localStorage.setItem(LOCAL_BEST, millis)
-
-      buzzOver()
 
       showBoard(false)
       showResult(true)

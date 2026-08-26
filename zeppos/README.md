@@ -332,24 +332,33 @@ by feel alone, in the dark, without looking:
 
 | | | |
 |---|---|---|
-| a hit | `SHORT_MIDDLE` | one tap, 20ms — over before the next whack, which at the top of the curve is 200ms away |
-| a miss | `DURATION` | 600ms held — deeper by being *longer*, the only way this API has of sounding deeper |
-| the end | `STRONG_REMINDER` | four pulses over 1200ms — a pattern, since it follows a strike immediately |
+| a hit | `SHORT_LIGHT` | one tap, 20ms — the lightest thing the motor can do, and over before the next whack |
+| a miss | `DURATION` | 600ms held — deeper by being *longer*, the only way this API has of being deeper |
 
-The three differ in **kind, not degree**: a tap, a hold, a pattern. That is deliberate. The
-three short scenes are all 20ms and differ only in strength, so grading a strike by strength
-alone would make it feel like a firmer hit rather than a different kind of event — and
-`SHORT_LIGHT` for a hit is 20ms of almost nothing on a moving arm.
+Two things, and the end of the run is not one of them. It used to be four pulses over
+1200ms, which is a long time to be buzzed at about something the screen has already said,
+and it landed immediately after the strike that caused it — so the last thing a run did was
+talk over itself.
+
+Deeper has to mean longer here. The three short scenes are all 20ms and differ only in
+strength, and there is no frequency control anywhere in `@zos/sensor`, so grading a strike
+by strength alone makes it feel like a firmer hit rather than a different kind of event.
+
+**`stop()` is deliberately not called before starting either of them.** It was, on the miss,
+on the theory that a mode set mid-pulse might not take — and the miss came out *delicate*
+while the hit, which never stopped anything, came out solid. Stopping the motor and
+immediately restarting it appears to swallow the start: the same shape of trap as `stop()`
+unloading the media player, where the call that looks like it makes the next one reliable is
+the one that loses it.
 
 A strike keeps the motor for exactly its own 600ms, so a whack landing in the same breath
 cannot cut the hold short and make a third of the run feel smaller than a hit. The cost is
-accepted: for that 600ms whacks do not answer, and having just lost a fruit is the thing
-worth feeling at that moment. Hits will not re-fire inside 55ms, because restarting a motor
-faster than it can finish a pulse is a hum rather than a series of taps.
+accepted: for that 600ms whacks do not answer. Hits will not re-fire inside 55ms, because
+restarting a motor faster than it can finish a pulse is a hum rather than a series of taps.
 
-`DURATION` and `STRONG_REMINDER` stop on their own. `VIBRATOR_SCENE_CALL` and `_TIMER` are
-the two that run until `stop()` is called, and neither belongs in a game. Leaving the page
-stops the motor anyway, since the end-of-run pattern outlasts the screen it belongs to.
+`DURATION` stops on its own. `VIBRATOR_SCENE_CALL` and `_TIMER` are the two that run until
+`stop()` is called, and neither belongs in a game. Leaving the page stops the motor anyway,
+since a miss on the last tick outlasts the screen it belongs to.
 
 Worth writing down, because the next person to reach for `@zos/media` should know what is
 waiting:
