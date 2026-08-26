@@ -57,6 +57,7 @@ jobs:
             website/delete-account/index.html \
             website/contact/index.html \
             website/contact/thanks/index.html \
+            website/auth/index.html \
             website/404.html \
             website/sitemap.xml \
             website/app-ads.txt \

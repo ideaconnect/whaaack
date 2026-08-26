@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Email confirmed — Whaaack!</title>
+<meta name="description" content="Confirms the email address on a Whaaack! account.">
+<meta name="theme-color" content="#140a1a">
+<meta name="robots" content="noindex">
+<link rel="icon" href="../assets/img/icon/favicon.ico" sizes="any">
+<link rel="icon" href="../assets/img/icon/whaaack-32.png" type="image/png">
+<link rel="stylesheet" href="../assets/css/site.css">
+</head>
+<!--
+  Where a confirmation link from the Zepp OS edition lands.
+
+  The phone game sends its links to `whaaack://auth`, a deep link only it can answer, and
+  that is right for the phone game: the app is by definition installed. It is wrong for the
+  watch. An account can be created entirely from the Whaaack! settings page inside the Zepp
+  app, by somebody who has never installed the Android version and has no reason to — and
+  for them a deep link is a dead end at the exact moment they are trying to finish signing
+  up. So the watch's signup asks GoTrue to send them here instead (see
+  zeppos/shared/supabase.js), where the answer is a sentence rather than an app.
+
+  Which flow a link belongs to is decided per request, by the `redirect_to` on the call that
+  sent the mail. Nothing about the project's configuration changes, and the phone game is
+  untouched.
+
+  This page is told what happened in the URL *fragment* — `#access_token=...&type=signup`
+  on success, `#error=...&error_code=...` on a link that has expired or been used. A
+  fragment never reaches a server, so only the script below can read it, which is why the
+  markup starts out saying neither thing and <noscript> says so honestly.
+
+  The tokens are read and thrown away. Confirming an address does not need a session, and
+  this page deliberately keeps none: nothing is written to storage, and the fragment is
+  stripped out of the address bar as soon as it has been read so it is not left sitting in
+  history or handed to anything else.
+-->
+<body>
+
+<a class="skip-link" href="#main">Skip to content</a>
+
+<div class="orchard" aria-hidden="true">
+  <span class="sky"></span>
+  <span class="trees"></span>
+  <span class="hills"></span>
+  <span class="scrim"></span>
+</div>
+
+<header class="site-header">
+  <div class="wrap">
+    <a class="brand" href="/whaaack/">
+      <img src="../assets/img/icon/whaaack-64.png" alt="" width="30" height="30">
+      Whaaack!
+    </a>
+    <nav class="nav">
+      <a href="/whaaack/">Home</a>
+      <a href="/whaaack/privacy/">Privacy</a>
+      <a href="/whaaack/terms/">Terms</a>
+      <a href="/whaaack/contact/">Contact</a>
+    </nav>
+  </div>
+</header>
+
+<main id="main" class="section">
+  <div class="wrap" style="text-align:center">
+    <div id="auth-mark" style="font-size:4rem;line-height:1;margin-bottom:18px" aria-hidden="true">🍉</div>
+    <span class="eyebrow" id="auth-eyebrow">Account</span>
+    <h1 id="auth-title" style="font-size:clamp(2rem,5vw,3rem)">Checking your link…</h1>
+
+    <div id="auth-body" role="status" aria-live="polite">
+      <noscript>
+        <p class="lead" style="margin-inline:auto">
+          This page reads the result out of the link you followed, and it needs JavaScript to
+          do it. If you came here from a confirmation email, your address has almost certainly
+          been confirmed — go back to the Whaaack! settings in the Zepp app and sign in. If
+          signing in still says the address is not confirmed, ask for a new link.
+        </p>
+      </noscript>
+    </div>
+
+    <p style="margin-top:30px">
+      <a class="btn btn-primary" href="/whaaack/">Back to the orchard</a>
+    </p>
+  </div>
+</main>
+
+<footer class="footer">
+  <div class="wrap">
+    <span>© <span data-year>2026</span> <a href="https://idct.tech">IDCT · Bartosz Pacholek</a></span>
+    <nav>
+      <a href="/whaaack/">Home</a>
+      <a href="/whaaack/privacy/">Privacy</a>
+      <a href="/whaaack/terms/">Terms</a>
+      <a href="/whaaack/contact/">Contact</a>
+    </nav>
+  </div>
+</footer>
+
+<script>
+/* Reads the outcome out of the link and says what happened.
+
+   Inline rather than in site.js because it has to run before anything can paint the wrong
+   answer, and because it is the only page on the site that does this. */
+(function () {
+  'use strict';
+
+  var mark = document.getElementById('auth-mark');
+  var eyebrow = document.getElementById('auth-eyebrow');
+  var title = document.getElementById('auth-title');
+  var body = document.getElementById('auth-body');
+
+  /* GoTrue puts the result in the fragment, and some failures in the query string
+     instead, so both are read and the fragment wins where they disagree. */
+  function params() {
+    var out = {};
+    [window.location.search, window.location.hash].forEach(function (part) {
+      if (!part || part.length < 2) return;
+      part.slice(1).split('&').forEach(function (pair) {
+        if (!pair) return;
+        var i = pair.indexOf('=');
+        var key = decodeURIComponent((i < 0 ? pair : pair.slice(0, i)).replace(/\+/g, ' '));
+        var value = i < 0 ? '' : decodeURIComponent(pair.slice(i + 1).replace(/\+/g, ' '));
+        if (key) out[key] = value;
+      });
+    });
+    return out;
+  }
+
+  function say(emoji, eyebrowText, headline, paragraphs) {
+    mark.textContent = emoji;
+    eyebrow.textContent = eyebrowText;
+    title.textContent = headline;
+    body.textContent = '';
+    paragraphs.forEach(function (text) {
+      var p = document.createElement('p');
+      p.className = 'lead';
+      p.style.marginInline = 'auto';
+      p.textContent = text;
+      body.appendChild(p);
+    });
+  }
+
+  var query = params();
+
+  /* Out of the address bar before anything else happens. The tokens are of no use to this
+     page and there is no reason for them to survive in history, in a bookmark, or in a
+     Referer header on the way to the next click. */
+  if (window.history && window.history.replaceState) {
+    window.history.replaceState(null, '', window.location.pathname);
+  }
+
+  if (query.error || query.error_code) {
+    var expired = /expired|invalid/i.test(query.error_code || query.error_description || '');
+    say('🙈', 'Link problem', expired ? 'That link has expired.' : 'That link did not work.', [
+      expired
+        ? 'Confirmation links are good for a limited time and can only be used once — this one is past it, or has already been used.'
+        : (query.error_description || 'The link could not be verified.'),
+      'Open Whaaack! in the Zepp app on your phone and try signing in. If it still says the address needs confirming, create the account again to get a fresh link.',
+    ]);
+    return;
+  }
+
+  if (query.type === 'recovery') {
+    say('🔑', 'Password reset', 'Time to set a new password.', [
+      'This is a password-reset link rather than a confirmation one. Setting the new password happens in the Whaaack! app for Android.',
+      'If you only play on your watch, get in touch and we will sort it out.',
+    ]);
+    return;
+  }
+
+  if (query.access_token || query.type === 'signup' || query.type === 'email_change') {
+    say('🍉', 'Account', 'Your email has been confirmed!', [
+      'That is everything — the address is verified and the account is ready.',
+      'Go back to Whaaack! in the Zepp app on your phone and sign in with the password you chose. Your watch runs will start appearing on the leaderboard.',
+    ]);
+    return;
+  }
+
+  /* Reached without any of it: somebody typed the address, or a mail client stripped the
+     fragment on the way. Neither is a failure worth alarming anybody about. */
+  say('🍉', 'Account', 'Nothing to confirm here.', [
+    'This page is where confirmation links from Whaaack! land. Open the link in the email you were sent and it will bring you back here with something to say.',
+  ]);
+})();
+</script>
+<script src="../assets/js/site.js" defer></script>
+</body>
+</html>

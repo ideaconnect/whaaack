@@ -11,7 +11,10 @@
 
   Deliberately absent: /whaaack/contact/thanks/, which is noindex — it is a
   destination you only reach by submitting the form, and it says nothing on its
-  own. 404.html is absent for the same reason and is noindex too.
+  own. 404.html is absent for the same reason and is noindex too, and so is
+  /whaaack/auth/, where email confirmation links from the Zepp OS edition land:
+  it is reached only from an inbox and says nothing without the token in the
+  fragment that brought you there.
 
   <changefreq>/<priority> are omitted on purpose — Google ignores both.
 -->
