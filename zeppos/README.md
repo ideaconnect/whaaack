@@ -332,16 +332,24 @@ by feel alone, in the dark, without looking:
 
 | | | |
 |---|---|---|
-| a hit | `SHORT_LIGHT` | a tick — up to five a second, so it has to be the smallest thing the motor can do |
-| a miss | `SHORT_STRONG` | a knock — three of these end the run, so it has to cut through the ticking |
-| the end | `DURATION` | a hold — the longest, and the only one that lasts |
+| a hit | `SHORT_MIDDLE` | one tap, 20ms — over before the next whack, which at the top of the curve is 200ms away |
+| a miss | `DURATION` | 600ms held — deeper by being *longer*, the only way this API has of sounding deeper |
+| the end | `STRONG_REMINDER` | four pulses over 1200ms — a pattern, since it follows a strike immediately |
 
-The ordering matters more than the exact scenes: light, strong, sustained. A strike keeps
-the motor to itself for 200ms so that a hit landing in the same breath cannot cut the knock
-short and make a third of the run feel like a tick, and hits will not re-fire the motor
-inside 55ms — faster than it can finish a pulse is a continuous hum rather than a series of
-taps. Leaving the page stops it, since the end-of-run buzz outlasts the screen it belongs
-to.
+The three differ in **kind, not degree**: a tap, a hold, a pattern. That is deliberate. The
+three short scenes are all 20ms and differ only in strength, so grading a strike by strength
+alone would make it feel like a firmer hit rather than a different kind of event — and
+`SHORT_LIGHT` for a hit is 20ms of almost nothing on a moving arm.
+
+A strike keeps the motor for exactly its own 600ms, so a whack landing in the same breath
+cannot cut the hold short and make a third of the run feel smaller than a hit. The cost is
+accepted: for that 600ms whacks do not answer, and having just lost a fruit is the thing
+worth feeling at that moment. Hits will not re-fire inside 55ms, because restarting a motor
+faster than it can finish a pulse is a hum rather than a series of taps.
+
+`DURATION` and `STRONG_REMINDER` stop on their own. `VIBRATOR_SCENE_CALL` and `_TIMER` are
+the two that run until `stop()` is called, and neither belongs in a game. Leaving the page
+stops the motor anyway, since the end-of-run pattern outlasts the screen it belongs to.
 
 Worth writing down, because the next person to reach for `@zos/media` should know what is
 waiting:

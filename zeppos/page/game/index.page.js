@@ -6,9 +6,9 @@ import { setPageBrightTime, resetPageBrightTime, pauseDropWristScreenOff, resetD
 import { onGesture, offGesture, onKey, offKey, GESTURE_RIGHT, KEY_BACK, KEY_EVENT_CLICK } from '@zos/interaction'
 import {
   Vibrator,
-  VIBRATOR_SCENE_SHORT_LIGHT,
-  VIBRATOR_SCENE_SHORT_STRONG,
+  VIBRATOR_SCENE_SHORT_MIDDLE,
   VIBRATOR_SCENE_DURATION,
+  VIBRATOR_SCENE_STRONG_REMINDER,
 } from '@zos/sensor'
 import { BasePage } from '@zeppos/zml/base-page'
 
@@ -170,17 +170,27 @@ const vibrator = new Vibrator()
  * This is the whole of the game's feedback now that it makes no sound, so the three events
  * a run can produce have to be told apart by feel alone, in the dark, through a strap:
  *
- *   a hit      SHORT_LIGHT    a tick. Happens up to five times a second at the top of the
- *                             curve, so it has to be the smallest thing the motor can do -
- *                             a strong buzz at that rate is one continuous blur, and an
- *                             arm that is always buzzing tells you nothing.
- *   a miss     SHORT_STRONG   a knock. Three of these end the run, so it has to cut through
- *                             the ticking and be unmistakable when it lands.
- *   the end    DURATION       a hold. Longest of the three, and the only one that lasts.
+ *   a hit      SHORT_MIDDLE      one tap, 20ms. It happens up to five times a second at
+ *                                the top of the curve, so it has to be over before the
+ *                                next one - anything longer runs into its successor and
+ *                                the whole run feels like one hum. Medium rather than
+ *                                light because it is the signal that has to survive a
+ *                                moving arm; light is 20ms of almost nothing.
+ *   a miss     DURATION          600ms held. Not a harder tap - a *longer* one, which is
+ *                                the only way this API has of sounding deeper: the three
+ *                                short scenes differ in strength and are all 20ms, so
+ *                                strength alone would make a strike feel like a firmer
+ *                                version of a hit rather than a different kind of event.
+ *   the end    STRONG_REMINDER   four pulses over 1200ms. A pattern, not a length, because
+ *                                the end follows a strike immediately and "the same buzz
+ *                                but longer" is not something anybody can time.
  *
- * The ordering matters more than the exact scenes: light, strong, sustained. A player
- * should be able to tell a strike from a hit without looking, which is the point of having
- * any of this on a watch.
+ * So the three differ in kind and not in degree: a tap, a hold, a pattern. That is what
+ * makes a strike tellable from a hit without looking, which is the point of having any of
+ * this on a watch.
+ *
+ * DURATION and STRONG_REMINDER stop on their own. VIBRATOR_SCENE_CALL and _TIMER are the
+ * two that run until `stop()` is called, and neither belongs in a game.
  */
 
 /**
@@ -188,20 +198,23 @@ const vibrator = new Vibrator()
  *
  * Two taps on two tiles cannot land 55ms apart on a wrist, so in a real run this never
  * fires. It is here because restarting the motor faster than it can finish a pulse gives a
- * continuous hum rather than a series of ticks, and one bad frame should not be able to
+ * continuous hum rather than a series of taps, and one bad frame should not be able to
  * cause that.
  */
 const HIT_MIN_GAP_MS = 55
 
 /**
- * How long a strike keeps the motor to itself.
+ * How long a strike keeps the motor to itself: exactly as long as its own buzz.
  *
  * A miss and a hit can land in the same handful of milliseconds - the fruit that escaped
- * and the one just whacked are independent - and a light tick starting on top of the knock
- * would cut it short, so the strike would be felt as something smaller than it is. The
- * strike is the more important of the two: it is a third of the run.
+ * and the one just whacked are independent - and a 20ms tap starting on top of the hold
+ * would cut 600ms of it away, so the strike would be felt as something smaller than a hit.
+ * The strike is the more important of the two: it is a third of the run.
+ *
+ * The cost is real and is accepted: for that 600ms, whacks do not answer. Having just lost
+ * a fruit is the thing worth feeling at that moment.
  */
-const MISS_HOLDS_MOTOR_MS = 200
+const MISS_HOLDS_MOTOR_MS = 600
 
 let lastHitBuzzMs = 0
 let motorHeldUntil = 0
@@ -214,25 +227,28 @@ function buzz(mode) {
   vibrator.start()
 }
 
-/** A whack landed. */
+/** A whack landed: one short tap, and nothing that outlives the next one. */
 function buzzHit(now) {
   if (now < motorHeldUntil) return
   if (now - lastHitBuzzMs < HIT_MIN_GAP_MS) return
   lastHitBuzzMs = now
-  vibrator.setMode(VIBRATOR_SCENE_SHORT_LIGHT)
+  // No `stop()` first, unlike the two below: this is the quiet one and it overrides
+  // nothing. Stopping a motor that is not running to start a 20ms pulse is a way to lose
+  // the pulse.
+  vibrator.setMode(VIBRATOR_SCENE_SHORT_MIDDLE)
   vibrator.start()
 }
 
-/** One got away. */
+/** One got away: deeper, by being longer. */
 function buzzMiss(now) {
   motorHeldUntil = now + MISS_HOLDS_MOTOR_MS
-  buzz(VIBRATOR_SCENE_SHORT_STRONG)
+  buzz(VIBRATOR_SCENE_DURATION)
 }
 
 /** That was the run. */
 function buzzOver() {
   motorHeldUntil = 0
-  buzz(VIBRATOR_SCENE_DURATION)
+  buzz(VIBRATOR_SCENE_STRONG_REMINDER)
 }
 
 const view = {
