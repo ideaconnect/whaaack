@@ -308,20 +308,61 @@ y=412, where its far corner is 235px from the centre and the rim is at 240.
 
 `@zos/media` arrived in Zepp OS 3.0 and takes MP3. It is a *media player*, not a sound
 bank: one source at a time, `setSource` then an asynchronous `prepare()` before anything
-will `start()`. So the watch gets two players — one per sound, because switching a player
-between them means re-preparing and a run whacks fruit five times a second — and one splat
-sound rather than the phone's nine, with the variety moved into the sprites instead.
+will `start()`. And there is exactly **one of it per app** — the second `create` returns
+`undefined`, with `js player instance already created, can't create new one` on the device
+side. Not a throw, not a message the caller can see.
 
-A player is not guaranteed, and there are two different ways to be refused. A watch with no
-speaker throws out of `create`, and there is nothing more to try. A watch that has audio
-but will only hand out one player at a time returns `undefined` from the second `create` —
-no throw, no message — which must not be read as "this watch has no sound", because the
-first player it gave out is working perfectly. The simulator does exactly this, which is
-how it was found.
+So the splat is claimed **before** the music, and in practice the music therefore never
+plays at all: the sound worth spending the only voice on is the one that answers a tap,
+because a hit that makes no sound is a hit that feels like it missed. `startMusic` is kept,
+and kept failing gracefully, so a device that ever hands out a second player gets its music
+for free. There is also one splat sound rather than the phone's nine, since picking a file
+per hit is a re-prepare this design cannot afford; the variety moved into the sprites.
 
-So the splat is claimed **before** the music. If a watch only has one player, the sound
-worth spending it on is the one that answers a tap: music is atmosphere and its absence is
-a quiet game, where a hit that makes no sound is a hit that feels like it missed.
+A watch with no speaker at all throws out of `create`, and there is nothing more to try.
+That is a different case from the refused second player, and reading the two the same way
+would tell a player their watch is mute when it is working perfectly.
+
+`release()` does give the one instance back, but not on the same tick — releasing and
+re-creating immediately still fails, while releasing on the way out of the game page and
+creating again on the way back in works every time.
+
+### What the platform does that the documentation does not say
+
+All three found by probing a running device, and all three load-bearing:
+
+1. **`start()`, `seek()` and `stop()` report failure by returning `false`, not by throwing.**
+   A guard that only catches exceptions sees a silent success.
+
+2. **`stop()` does not pause a loaded file — it unloads it.** The status drops from
+   PREPARED back to INITIALIZED, and `start()` from there answers `false`. So "stop it and
+   start it again", the obvious way to retrigger a sample, is precisely the thing that
+   cannot be done: it takes the player apart.
+
+3. **`seek(percentage)` is the retrigger.** It leaves the player started and moves the
+   playhead, which is what "cut this splat short and play it again" actually means here.
+
+Points 1 and 2 together were a real bug, and shipped: `playSplat` stopped the player before
+starting it, so every hit unloaded the file and then failed to start it, in silence, with
+no exception for anything to catch. On the bench it presented as splats that lagged behind
+the tap and refused to overlap — a hit during a splat was simply lost.
+
+The status codes are not hard-coded. Only three were ever observed (IDLE 0, INITIALIZED 1,
+PREPARING 2) and guessing the rest from the documentation's ordering would be a guess in
+the one place that decides whether a sound plays, so the player is asked what it reports at
+the one moment it is certainly loaded — inside its own `PREPARE` handler — and that number
+is remembered. Whether a sound is still *sounding* is not read from the player at all: it
+is kept by the clock, because a status read straight after `start()` can report a
+transitional state that never recurs.
+
+[`tools/check-audio.mjs`](tools/check-audio.mjs) runs the real `audio.js` against a fake
+device built from that probe ([`tools/fake-media.js`](tools/fake-media.js)), because the
+simulator cannot answer any of this — it has no audio device, so `prepare()` never leaves
+PREPARING and every path past "the file is loaded" is unreachable there, which is exactly
+where the bug lived. It exercises both plausible devices, since one thing still cannot be
+settled without hardware: whether playback ending leaves the file loaded or unloads it the
+way `stop()` does. The code has to be right either way, and the check fails 15 times
+against the version that shipped.
 
 There is no loop flag in the API either, so the music loops by starting itself again on
 `COMPLETE` — a hard cut, with whatever gap a restart costs. The file is therefore cut to a
