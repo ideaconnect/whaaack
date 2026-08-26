@@ -9,7 +9,8 @@ longer you last.
 Android · Kotlin · Jetpack Compose · Supabase · AdMob
 
 There is also a **[Zepp OS edition](zeppos/)** for Amazfit watches — 3x3 instead of 4x4,
-one finger instead of two thumbs, and a leaderboard of its own.
+one finger instead of two thumbs, a leaderboard of its own, and a board drawn on unlit
+black because every watch it runs on has an AMOLED panel.
 
 ---
 
@@ -102,7 +103,8 @@ supabase/
   migrations/   schema, RLS, leaderboard functions
   config.toml   remote auth settings
 website/        the project site, published to idct.tech/whaaack/
-tools/          launcher-icon generator (Pillow + numpy)
+tools/          launcher and watch asset generators (Pillow + numpy), watch audio (ffmpeg)
+                and the settings-page images, base64'd into zeppos/setting/assets.js
 docs/SETUP.md   credentials, Google OAuth, AdMob consent, release checklist
 docs/GO-TO-PRODUCTION-TECHNICAL.md      what is left in the repo before release
 docs/GO-TO-PRODUCTION-NON-TECHNICAL.md  what is left in a console or a contract
