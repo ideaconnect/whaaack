@@ -99,6 +99,14 @@ CROWN_GOLD = (0xF3, 0xC3, 0x3C)
 
 # The size zeus scaffolds, and what the Zepp app's list draws from.
 ICON_PX = 248
+
+# The Zepp app store console asks for exactly 240x240, circular, transparent outside the
+# circle and with no padding around it. The on-watch icon already has that shape - the
+# circle is the whole canvas and the corners are clear - so only the size differs, and it
+# is rendered from the master rather than resampled from the 248 so the rim stays clean.
+# Kept out of assets/default.r because it is never packaged: it is uploaded once, by hand.
+STORE_ICON_PX = 240
+STORE_OUT = ROOT / "assets" / "zepp"
 # The artwork sits inside its own tile rather than flush to the edge, so the round
 # crop never shaves the splat.
 ICON_ART_DIA = 206
@@ -239,14 +247,27 @@ def build_tap_target() -> int:
     return K.save_png(blank, OUT / "tap.png")
 
 
-def build_icon() -> int:
+def render_icon(size: int, art_diameter: int) -> Image.Image:
     src = Image.open(ICON_SRC).convert("RGBA")
     alpha = np.asarray(src)[..., 3]
     circle = K.centroid_circle(alpha, alpha > 40)
-    out = Image.new("RGBA", (ICON_PX, ICON_PX), BACKGROUND)
-    out.alpha_composite(K.place(src, circle, ICON_PX, ICON_ART_DIA))
-    out.putalpha(K.circle_mask(ICON_PX))
-    return K.save_png(out, OUT / "icon.png", allow_palette=False)
+    out = Image.new("RGBA", (size, size), BACKGROUND)
+    out.alpha_composite(K.place(src, circle, size, art_diameter))
+    out.putalpha(K.circle_mask(size))
+    return out
+
+
+def build_icon() -> int:
+    return K.save_png(render_icon(ICON_PX, ICON_ART_DIA), OUT / "icon.png", allow_palette=False)
+
+
+def build_store_icon() -> int:
+    # The same framing, kept proportional, so the store listing and the watch's own app
+    # list are recognisably one icon rather than two crops of one drawing.
+    art = round(STORE_ICON_PX * ICON_ART_DIA / ICON_PX)
+    return K.save_png(
+        render_icon(STORE_ICON_PX, art), STORE_OUT / "app-icon-240.png", allow_palette=False
+    )
 
 
 def write_preview(fruits: list[str]) -> None:
@@ -273,12 +294,14 @@ def main() -> int:
     splat_bytes, splat_count = build_splats()
     badge_bytes, badge_count = build_badges()
     icon_bytes = build_icon()
+    store_icon_bytes = build_store_icon()
     tap_bytes = build_tap_target()
 
     print(f"{len(fruits)} fruit at {FRUIT_PX}px: {fruit_bytes:,} bytes")
     print(f"{splat_count} splats at {SPLAT_PX}px: {splat_bytes:,} bytes")
     print(f"{badge_count} badges at {BADGE_PX}px: {badge_bytes:,} bytes")
     print(f"icon at {ICON_PX}px: {icon_bytes:,} bytes")
+    print(f"store icon at {STORE_ICON_PX}px: {store_icon_bytes:,} bytes -> assets/zepp/")
     print(f"transparent tap target at {TAP_PX}px: {tap_bytes:,} bytes")
 
     if args.preview:
