@@ -32,6 +32,8 @@ tools/stat-icons-preview.png
 tools/social-preview.png
 # Regenerate with: python tools/generate_zepp_assets.py --preview
 tools/zepp-preview.png
+# Regenerate with: python tools/generate_zepp_settings_assets.py --preview
+tools/zepp-settings-preview.png
 tools/__pycache__/
 
 # The Game Stats upload bundle: a zip of files that are themselves committed beside it.

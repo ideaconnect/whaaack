@@ -37,8 +37,8 @@ msgstr "Whaaacked!"
 msgid "runEnded"
 msgstr "Run ended"
 
-msgid "msAnd"
-msgstr " ms · "
+msgid "sep"
+msgstr " · "
 
 msgid "hits"
 msgstr " hits"
@@ -78,3 +78,12 @@ msgstr " of "
 
 msgid "noRankedRun"
 msgstr "No ranked run yet."
+
+msgid "soundOn"
+msgstr "Sound on"
+
+msgid "soundOff"
+msgstr "Sound off"
+
+msgid "soundNone"
+msgstr "No sound"

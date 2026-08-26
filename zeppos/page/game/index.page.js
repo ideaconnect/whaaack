@@ -11,14 +11,18 @@ import {
   createEngine,
   TILE_COUNT,
   MAX_STRIKES,
-  HIT_FLASH_MS,
+  SPLAT_LIFE_MS,
+  SPLAT_HOLD,
+  SURVIVE_TIERS,
+  tiersCleared,
   WARN_FRACTION,
   PHASE_COUNTDOWN,
   PHASE_RUNNING,
   PHASE_OVER,
 } from '../../shared/engine.js'
 import { REQ_SUBMIT, LOCAL_BEST } from '../../shared/protocol.js'
-import { seconds, secondsLabel, grouped } from '../../shared/format.js'
+import { seconds, secondsLabel } from '../../shared/format.js'
+import { startMusic, primeSplat, playSplat, release as releaseAudio } from '../../shared/audio.js'
 import {
   CREAM,
   CREAM_DIM,
@@ -28,7 +32,6 @@ import {
   TILE_EMPTY,
   TILE_ACTIVE,
   TILE_WARN,
-  TILE_HIT,
   PIP_SPENT,
   PIP_LEFT,
 } from '../../shared/theme.js'
@@ -38,6 +41,9 @@ import {
   TILE_GAP,
   TILE_RADIUS,
   FRUIT,
+  SPLAT,
+  BADGE,
+  BADGE_GAP,
   GRID_X,
   GRID_Y,
   GRID_W,
@@ -45,6 +51,8 @@ import {
   tileX,
   tileY,
   tileInset,
+  splatX,
+  splatY,
   PIP_R,
   PIP_GAP,
   PIP_Y,
@@ -55,7 +63,20 @@ import {
   CAPTION_FONT,
   BIG_FONT,
 } from '../../shared/layout.js'
-import { ground, text, button, rect, circle, image, show, setText, setColor, setSrc } from '../../shared/widgets.js'
+import {
+  ground,
+  text,
+  button,
+  rect,
+  circle,
+  image,
+  show,
+  setText,
+  setColor,
+  setSrc,
+  setAlpha,
+  setX,
+} from '../../shared/widgets.js'
 
 /** 25fps. Fast enough that a 460ms fruit gets a dozen frames; slow enough to stay cool. */
 const TICK_MS = 40
@@ -73,20 +94,35 @@ const FRUIT_INSET = tileInset(FRUIT)
 const TAP_TARGET = 'tap.png'
 
 const COUNTDOWN_FONT = px(96)
-const RESULT_TITLE_Y = px(64)
-const RESULT_SCORE_Y = px(112)
-const RESULT_DETAIL_Y = px(192)
-const RESULT_BEST_Y = px(228)
-const RESULT_STATUS_Y = px(264)
-const RESULT_BUTTON_Y = px(322)
+
+/**
+ * The result screen, top to bottom.
+ *
+ * Tighter than it was, to fit the badge row in. What went to make room was the raw
+ * millisecond count: it said the same thing as the seconds above it, in a unit nobody
+ * compares runs in, and the hits it shared a line with have moved up next to the best.
+ * The bottom is set by the glass rather than by taste - the Play again button ends at
+ * y=412, where its far corner is 235px from the centre and the rim is at 240.
+ */
+const RESULT_TITLE_Y = px(58)
+const RESULT_SCORE_Y = px(106)
+const BADGE_Y = px(188)
+const RESULT_BEST_Y = px(244)
+const RESULT_STATUS_Y = px(282)
+const RESULT_BUTTON_Y = px(342)
 const RESULT_BUTTON_X = px(80)
+
+/** Four tiers plus the trophy: the most badges a single run can earn. */
+const BADGE_SLOTS = SURVIVE_TIERS.length + 1
 
 const TILE_STATE_EMPTY = 0
 const TILE_STATE_ACTIVE = 1
 const TILE_STATE_WARN = 2
-const TILE_STATE_HIT = 3
 
-const TILE_COLORS = [TILE_EMPTY, TILE_ACTIVE, TILE_WARN, TILE_HIT]
+const TILE_COLORS = [TILE_EMPTY, TILE_ACTIVE, TILE_WARN]
+
+/** Where the fade begins, in milliseconds rather than as a fraction, once per module. */
+const SPLAT_HOLD_MS = SPLAT_LIFE_MS * SPLAT_HOLD
 
 /**
  * The run.
@@ -97,6 +133,16 @@ const TILE_COLORS = [TILE_EMPTY, TILE_ACTIVE, TILE_WARN, TILE_HIT]
  * That matters more here than it would on a phone: this loop runs 25 times a second on a
  * watch, and a `createWidget`/`deleteWidget` pair per fruit would churn the heap on the
  * exact device that has the least of it.
+ *
+ * The board is four layers, and the order they are created in is the order they stack:
+ * tiles, then splats, then fruit, then the touch targets. That is what puts a fresh fruit
+ * over the splat of the one whacked before it, and lets a splat spill across the gutter
+ * onto its neighbours without covering what is growing there.
+ *
+ * A splat is one widget per tile rather than one per hit, because the engine keeps one
+ * splat per tile for the same reason: a widget shows one bitmap, so a second hit on a
+ * tile that is still fading replaces what is on it. At five hits a second across nine
+ * tiles that is the difference between nine widgets and a hundred.
  *
  * Touch is nine BUTTON widgets laid over the board, one per tile. The tidier-looking
  * alternative - a single listener on the background, mapping coordinates to a tile - does
@@ -117,10 +163,12 @@ const view = {
   clock: null,
   pips: [],
   tiles: [],
+  splats: [],
   fruits: [],
   taps: [],
   countdown: null,
   result: {},
+  badges: [],
 }
 
 /** What each widget is currently showing, so a frame only writes what changed. */
@@ -129,6 +177,8 @@ const shown = {
   strikes: -1,
   tileState: new Array(TILE_COUNT).fill(-1),
   fruit: new Array(TILE_COUNT).fill(null),
+  splat: new Array(TILE_COUNT).fill(null),
+  splatAlpha: new Array(TILE_COUNT).fill(-1),
   countdown: -1,
 }
 
@@ -148,8 +198,10 @@ Page(
       alive = true
       view.pips = []
       view.tiles = []
+      view.splats = []
       view.fruits = []
       view.taps = []
+      view.badges = []
 
       ground()
 
@@ -166,6 +218,18 @@ Page(
       // so fruit expire unseen and the player is handed the result of a run they could
       // not watch.
       pauseDropWristScreenOff({ duration: 0 })
+
+      // Both are asynchronous and neither is worth waiting for: the splat is loaded now
+      // so that the first hit of the first run plays as promptly as the last, and the
+      // music starts whenever it is ready. Started here rather than in `startRun` because
+      // the music is meant to carry across the result screen and into the next run - a
+      // track that stopped and restarted every time somebody pressed Play again would be
+      // a stutter, not a soundtrack.
+      //
+      // The splat goes first because a watch may only hand out one player, and if it
+      // does, the sound worth spending it on is the one that answers a tap.
+      primeSplat()
+      startMusic()
 
       // A run in progress swallows Back and ends the run instead; a second Back then
       // leaves, because by that point there is nothing to protect. The same rule for the
@@ -189,6 +253,9 @@ Page(
       offKey()
       resetPageBrightTime()
       resetDropWristScreenOff()
+      // The one call that has to happen. A player left holding the audio route keeps the
+      // music going into whatever the watch shows next, and keeps the speaker powered.
+      releaseAudio()
     },
 
     startRun() {
@@ -225,7 +292,12 @@ Page(
     onTile(tile) {
       if (engine.phase !== PHASE_RUNNING) return
       const now = Date.now()
-      if (engine.tap(tile, now)) renderFrame(now)
+      if (!engine.tap(tile, now)) return
+      // Rendered before the sound, because the splat is the feedback that has to be
+      // immediate: `playSplat` is a call into the media stack and a miss there must not
+      // hold up the frame that shows the hit landed.
+      renderFrame(now)
+      playSplat(now)
     },
 
     /**
@@ -258,14 +330,22 @@ Page(
 
       setText(view.result.title, engine.quit ? getText('runEnded') : getText('whaaacked'))
       setText(view.result.score, secondsLabel(millis))
-      setText(view.result.detail, grouped(millis) + getText('msAnd') + hits + getText('hits'))
       setText(
         view.result.best,
-        isBest
-          ? getText('newBest')
-          : getText('best') + secondsLabel(Math.max(previousBest, millis)),
+        hits +
+          getText('hits') +
+          getText('sep') +
+          (isBest
+            ? getText('newBest')
+            : getText('best') + secondsLabel(Math.max(previousBest, millis))),
       )
       setColor(view.result.best, isBest ? SUCCESS : CREAM_FAINT)
+
+      // The trophy is for beating a run, not for having one. On a watch that has never
+      // seen a finished run `previousBest` is zero, every score is a "best", and a trophy
+      // for clearing nothing would be the first thing a new player was ever awarded - and
+      // the last time it meant anything.
+      showBadges(tiersCleared(millis), previousBest > 0 && millis > previousBest)
 
       this.submit(millis, hits)
     },
@@ -350,6 +430,19 @@ function buildBoard(page) {
       }),
     )
   }
+  // Over the tiles and under the fruit. Nine of them, one per tile, each holding whatever
+  // was last whacked there for as long as it takes to fade.
+  for (let i = 0; i < TILE_COUNT; i++) {
+    const splat = image({
+      x: splatX(i),
+      y: splatY(i),
+      w: SPLAT,
+      h: SPLAT,
+      src: 'splat-apple-0.png',
+    })
+    show(splat, false)
+    view.splats.push(splat)
+  }
   // Every fruit widget is created up front and then only ever has its source swapped.
   // Nine of them is the ceiling however many slots the ladder opens, because two fruit
   // can never share a tile.
@@ -407,13 +500,22 @@ function buildResult(page) {
     color: CREAM,
     content: '',
   })
-  view.result.detail = text({
-    y: RESULT_DETAIL_Y,
-    h: CAPTION_FONT + px(10),
-    size: CAPTION_FONT,
-    color: CREAM_DIM,
-    content: '',
-  })
+  // Over the badge row, so a badge is never clipped by a text box drawn after it. Five
+  // slots created once and moved rather than created per run: the row is centred, so
+  // every widget's x depends on how many earned it, and a `createWidget` per result would
+  // churn the heap on the device with the least of it.
+  for (let i = 0; i < BADGE_SLOTS; i++) {
+    const badge = image({
+      x: 0,
+      y: BADGE_Y,
+      w: BADGE,
+      h: BADGE,
+      src: 'badge-best.png',
+    })
+    show(badge, false)
+    view.badges.push(badge)
+  }
+
   view.result.best = text({
     y: RESULT_BEST_Y,
     h: CAPTION_FONT + px(10),
@@ -452,7 +554,21 @@ function resetShown() {
   for (let i = 0; i < TILE_COUNT; i++) {
     shown.tileState[i] = -1
     shown.fruit[i] = null
+    shown.splat[i] = null
+    shown.splatAlpha[i] = -1
   }
+}
+
+/**
+ * A splat's opacity at `age`: full strength for the first stretch of its life, then a
+ * linear fade to nothing. Same shape as the phone's, which holds and then fades rather
+ * than fading throughout - a splat that starts dimming the instant it lands reads as a
+ * mistake, where one that sits for a moment first reads as something that dried.
+ */
+function splatAlpha(age) {
+  if (age <= SPLAT_HOLD_MS) return 255
+  const left = 1 - (age - SPLAT_HOLD_MS) / (SPLAT_LIFE_MS - SPLAT_HOLD_MS)
+  return Math.max(0, Math.round(left * 255))
 }
 
 function showBoard(visible) {
@@ -461,7 +577,10 @@ function showBoard(visible) {
   for (let i = 0; i < TILE_COUNT; i++) {
     show(view.tiles[i], visible)
     show(view.taps[i], visible)
-    if (!visible) show(view.fruits[i], false)
+    if (!visible) {
+      show(view.fruits[i], false)
+      show(view.splats[i], false)
+    }
   }
   if (!visible) show(view.countdown, false)
 }
@@ -469,10 +588,40 @@ function showBoard(visible) {
 function showResult(visible) {
   show(view.result.title, visible)
   show(view.result.score, visible)
-  show(view.result.detail, visible)
   show(view.result.best, visible)
   show(view.result.status, visible)
   show(view.result.again, visible)
+  if (!visible) {
+    for (let i = 0; i < view.badges.length; i++) show(view.badges[i], false)
+  }
+}
+
+/**
+ * Lays out what the run earned, centred as a row.
+ *
+ * Every tier cleared rather than only the highest, because the four read as a ladder -
+ * the ring around each is a clock, a quarter lit at thirty seconds and closed at a
+ * hundred and twenty - and a ladder with only its top rung showing is just a picture.
+ * Seeing three of them fill up is most of the reward for a long run.
+ */
+function showBadges(tiers, beatenBest) {
+  const names = []
+  for (let i = 0; i < tiers.length; i++) names.push('badge-' + tiers[i] / 1000 + '.png')
+  if (beatenBest) names.push('badge-best.png')
+
+  const width = names.length * BADGE + Math.max(0, names.length - 1) * BADGE_GAP
+  let x = Math.round((SCREEN_W - width) / 2)
+
+  for (let i = 0; i < view.badges.length; i++) {
+    if (i >= names.length) {
+      show(view.badges[i], false)
+      continue
+    }
+    setSrc(view.badges[i], names[i])
+    setX(view.badges[i], x)
+    show(view.badges[i], true)
+    x += BADGE + BADGE_GAP
+  }
 }
 
 function renderFrame(now) {
@@ -511,14 +660,14 @@ function renderFrame(now) {
         engine.remainingFraction(active, now) <= WARN_FRACTION
           ? TILE_STATE_WARN
           : TILE_STATE_ACTIVE
-    } else if (now - engine.clearedAt[tile] < HIT_FLASH_MS) {
-      state = TILE_STATE_HIT
     }
 
     if (state !== shown.tileState[tile]) {
       shown.tileState[tile] = state
       setColor(view.tiles[tile], TILE_COLORS[state])
     }
+
+    renderSplat(tile, now)
 
     const fruit = active ? active.fruit : null
     if (fruit !== shown.fruit[tile]) {
@@ -530,6 +679,40 @@ function renderFrame(now) {
         show(view.fruits[tile], false)
       }
     }
+  }
+}
+
+/**
+ * One tile's splat: swapped in when it lands, faded across its life, hidden when it is
+ * gone.
+ *
+ * The alpha is written before the widget is shown, so a splat landing on a tile whose
+ * last one had faded to nothing cannot appear for a frame at that leftover opacity.
+ */
+function renderSplat(tile, now) {
+  const splat = engine.splats[tile]
+  const widget = view.splats[tile]
+  const src = splat ? 'splat-' + splat.fruit + '-' + splat.variant + '.png' : null
+
+  if (src !== shown.splat[tile]) {
+    shown.splat[tile] = src
+    if (!src) {
+      shown.splatAlpha[tile] = -1
+      show(widget, false)
+      return
+    }
+    shown.splatAlpha[tile] = splatAlpha(now - splat.bornMs)
+    setSrc(widget, src)
+    setAlpha(widget, shown.splatAlpha[tile])
+    show(widget, true)
+    return
+  }
+
+  if (!src) return
+  const alpha = splatAlpha(now - splat.bornMs)
+  if (alpha !== shown.splatAlpha[tile]) {
+    shown.splatAlpha[tile] = alpha
+    setAlpha(widget, alpha)
   }
 }
 

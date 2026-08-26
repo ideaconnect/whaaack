@@ -18,22 +18,6 @@ export function secondsLabel(millis) {
   return seconds(millis) + 's'
 }
 
-/**
- * 128940 -> "128,940", matching the phone game's score formatting.
- *
- * Written out rather than handed to `toLocaleString`, which the watch runtime does not
- * carry, and grouped from the right so it is correct for any length.
- */
-export function grouped(value) {
-  const digits = String(Math.max(0, Math.floor(value)))
-  let out = ''
-  for (let i = 0; i < digits.length; i++) {
-    if (i > 0 && (digits.length - i) % 3 === 0) out += ','
-    out += digits[i]
-  }
-  return out
-}
-
 /** "1st", "2nd", "3rd", "4th" - for the standing line under the board. */
 export function ordinal(rank) {
   const mod100 = rank % 100

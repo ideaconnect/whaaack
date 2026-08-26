@@ -22,12 +22,17 @@ export const REQ_SUBMIT = 'SUBMIT'
 
 /**
  * What the settings page asks the side service to do, as JSON:
- * `{ action: 'signin', email, password, at }`, `{ action: 'signup', email, password, name,
- * at }`, or `{ action: 'signout', at }`.
  *
- * The password lives in this key only for as long as it takes the side service to spend
- * it on a token, which clears the key. It is never written to the session key, never sent
- * to the watch, and never kept once sign-in has succeeded or failed.
+ *   `{ action: 'signin',   email, password, at }`
+ *   `{ action: 'signup',   email, password, name, at }`
+ *   `{ action: 'signout',  at }`
+ *   `{ action: 'reset',    email, at }`     mail a password-reset link
+ *   `{ action: 'password', password, at }`  set a new password on the live session
+ *
+ * A password lives in this key only for as long as it takes the side service to spend it,
+ * which clears the key. It is never written to the session key, never sent to the watch,
+ * and never kept once the attempt has succeeded or failed. That holds for the new password
+ * in a `password` request exactly as it does for the one in a `signin`.
  *
  * `at` is a timestamp with no meaning beyond making every request a distinct value:
  * `onSettingsChange` fires on change, so retrying the same wrong password twice has to
@@ -37,11 +42,18 @@ export const KEY_AUTH_REQUEST = 'authRequest'
 
 /**
  * What the side service reports back, as JSON:
- * `{ state: 'signed_in' | 'signed_out' | 'working' | 'confirm' | 'error',
- *    name?, email?, message? }`.
+ * `{ state: 'signed_in' | 'signed_out' | 'working' | 'confirm' | 'reset_sent' | 'error',
+ *    name?, email?, message?, notice?, problem?, busy? }`.
  *
  * The settings page renders straight from this, so the phone always shows what the
  * service actually managed to do rather than what the form hoped it would.
+ *
+ * `notice`, `problem` and `busy` belong to the signed-in state and to nothing else. A
+ * password change happens *inside* an account that is already signed in, so its progress
+ * and its outcome cannot be reported as `working` or `error` the way sign-in's are: the
+ * page picks its whole layout off `state`, and either of those would replace the account
+ * card - and the change-password field on it - with a sign-in form, over a session that is
+ * still perfectly good.
  */
 export const KEY_AUTH_STATUS = 'authStatus'
 
@@ -85,6 +97,27 @@ export const KEY_SESSION = 'session'
 /** Best run this watch has seen, whether or not it was ever ranked. */
 export const LOCAL_BEST = 'best'
 
+/**
+ * Whether the game makes any sound, as `1` or `0`. Absent means on.
+ *
+ * On the watch rather than in the phone's settings page, where the account lives, because
+ * this is the one preference a player may want to change without their phone in reach -
+ * the point of turning the music off is usually that somebody has just walked in. A
+ * setting that needed the Zepp app to change would be no use at that moment.
+ */
+export const LOCAL_SOUND = 'sound'
+
+/**
+ * `'1'` once this watch has actually played something, `'0'` once it has refused outright.
+ * Absent until either has happened.
+ *
+ * Whether a watch can play audio at all is only discoverable on the game page, a second or
+ * two after it opens - and the place a player asks the question is the home screen, where
+ * the toggle would otherwise go on offering sound that they have already found out is not
+ * coming. Remembering the answer is what lets that button stop lying.
+ */
+export const LOCAL_SOUND_OK = 'soundOk'
+
 // ------------------------------------------------------------------------- statuses
 
 export const AUTH_SIGNED_OUT = 'signed_out'
@@ -101,6 +134,17 @@ export const AUTH_ERROR = 'error'
  * round the signup form a second time.
  */
 export const AUTH_CONFIRM = 'confirm'
+
+/**
+ * A reset link is in the post.
+ *
+ * Its own state rather than a flavour of `confirm`, which says "we made you an account,
+ * now prove the address". This one says "we did not make anything, and if that address has
+ * an account there is a link on its way to it" - a different promise, and one that has to
+ * be worded carefully, because GoTrue answers a recovery request for an address it has
+ * never seen exactly as it answers one for an address it knows.
+ */
+export const AUTH_RESET_SENT = 'reset_sent'
 
 export const SCOPE_ALL_TIME = 'all_time'
 export const SCOPE_WEEKLY = 'weekly'

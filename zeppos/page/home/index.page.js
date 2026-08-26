@@ -1,3 +1,4 @@
+import * as hmUI from '@zos/ui'
 import { px } from '@zos/utils'
 import { push } from '@zos/router'
 import { localStorage } from '@zos/storage'
@@ -6,8 +7,20 @@ import { BasePage } from '@zeppos/zml/base-page'
 
 import { REQ_AUTH, LOCAL_BEST } from '../../shared/protocol.js'
 import { secondsLabel } from '../../shared/format.js'
+import { soundOn, setSoundOn, soundKnownBroken } from '../../shared/audio.js'
 import { ACCENT, CREAM_DIM, CREAM_FAINT } from '../../shared/theme.js'
-import { SCREEN_W, TITLE_FONT, BODY_FONT, CAPTION_FONT } from '../../shared/layout.js'
+import {
+  SCREEN_W,
+  TITLE_FONT,
+  BODY_FONT,
+  CAPTION_FONT,
+  BEST_X,
+  BEST_W,
+  SOUND_X,
+  SOUND_Y,
+  SOUND_W,
+  SOUND_H,
+} from '../../shared/layout.js'
 import { ground, text, button, setText } from '../../shared/widgets.js'
 
 // Design pixels on the 480px circle. The bottom line is the one that needs checking: it
@@ -22,6 +35,7 @@ const ACCOUNT_Y = px(356)
 const ACCOUNT_X = px(84)
 
 let bestLabel = null
+let soundButton = null
 let accountLabel = null
 
 /** False once the page is gone; the account lookup is a round trip to the phone. */
@@ -58,12 +72,27 @@ Page(
         content: getText('tagline'),
       })
 
+      // Left-aligned rather than centred, because it now shares its band with the sound
+      // toggle: two things centred on one line read as one wobbly thing.
       bestLabel = text({
+        x: BEST_X,
         y: BEST_Y,
+        w: BEST_W,
         h: BODY_FONT + px(8),
         size: BODY_FONT,
         color: CREAM_DIM,
+        align: hmUI.align.LEFT,
         content: bestText(),
+      })
+
+      soundButton = button({
+        x: SOUND_X,
+        y: SOUND_Y,
+        w: SOUND_W,
+        h: SOUND_H,
+        size: CAPTION_FONT,
+        label: soundText(),
+        onClick: () => this.toggleSound(),
       })
 
       button({
@@ -104,6 +133,18 @@ Page(
       this.refreshAccount()
     },
 
+    /**
+     * Flips the sound and says so on the button.
+     *
+     * Written to local storage rather than held here, because every page that makes a
+     * noise reads it fresh: the game page is a separate module with its own lifetime, and
+     * a preference in a variable would not survive the walk between the two.
+     */
+    toggleSound() {
+      setSoundOn(!soundOn())
+      setText(soundButton, soundText())
+    },
+
     refreshAccount() {
       this.request({ method: REQ_AUTH })
         .then((data) => {
@@ -126,4 +167,18 @@ Page(
 function bestText() {
   const best = Number(localStorage.getItem(LOCAL_BEST, 0)) || 0
   return best > 0 ? getText('best') + secondsLabel(best) : getText('noRunsYet')
+}
+
+/**
+ * What the toggle says.
+ *
+ * Three labels for two states, because a watch that will not play anything is worth saying
+ * out loud: the alternative is a button that reads "Sound on" over a game that has never
+ * made a noise, which sends a player looking for the volume control they do not have.
+ * Whether it plays is only discoverable during a run, so the answer is remembered from the
+ * last one (see `soundKnownBroken`).
+ */
+function soundText() {
+  if (!soundOn()) return getText('soundOff')
+  return soundKnownBroken() ? getText('soundNone') : getText('soundOn')
 }

@@ -20,7 +20,7 @@
  * carrying the late game and MAX_TARGETS or the slot levels need another look.
  */
 
-import { createEngine, PHASE_OVER, PHASE_RUNNING } from '../shared/engine.js'
+import { createEngine, PHASE_OVER, PHASE_RUNNING, SURVIVE_TIERS } from '../shared/engine.js'
 
 const TICK_MS = 40
 
@@ -101,6 +101,8 @@ const capMs = 15 * 60 * 1000
 console.log(`${runs} runs per grade, ${TICK_MS}ms tick\n`)
 console.log('grade    median      p10       p90      max   hits/s  capped')
 
+const attained = []
+
 for (const grade of GRADES) {
   const results = []
   for (let i = 0; i < runs; i++) results.push(playOne(grade, 1000 + i, capMs))
@@ -118,5 +120,26 @@ for (const grade of GRADES) {
       s(lengths[lengths.length - 1]) +
       (totalHits / (totalMs / 1000)).toFixed(2).padStart(8) +
       String(capped).padStart(8),
+  )
+
+  attained.push({
+    name: grade.name,
+    shares: SURVIVE_TIERS.map(
+      (tier) => results.filter((r) => r.millis >= tier).length / results.length,
+    ),
+  })
+}
+
+// How often each grade earns each badge. The four tiers are the phone game's Play Games
+// achievements reused, so they were not chosen against *this* curve - which makes "does a
+// casual player ever see one, and does anybody see all four" a question worth answering
+// rather than assuming. What it should show is a staircase: a badge that everybody gets
+// is decoration, and one that nobody gets is a bug nobody will ever report.
+console.log('\nbadges earned, share of runs')
+console.log('grade   ' + SURVIVE_TIERS.map((t) => String(t / 1000 + 's').padStart(8)).join(''))
+for (const grade of attained) {
+  console.log(
+    grade.name.padEnd(8) +
+      grade.shares.map((share) => (share * 100).toFixed(0).padStart(7) + '%').join(''),
   )
 }

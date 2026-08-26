@@ -8,16 +8,20 @@
 
 import * as hmUI from '@zos/ui'
 
-import { SCREEN_W, SCREEN_H, CONTENT_X, CONTENT_W, BUTTON_H, BUTTON_RADIUS, BODY_FONT } from './layout.js'
+import { SCREEN_W, SCREEN_H, CONTENT_X, CONTENT_W, BUTTON_H, BODY_FONT } from './layout.js'
 import { BACKGROUND, CREAM, ACCENT, ACCENT_INK, PANEL, PANEL_PRESSED } from './theme.js'
 
 /**
  * The page's ground.
  *
- * Purely a backdrop: a Zepp OS page starts out black, and every page here wants the
- * orchard behind it. Not a touch surface - `addEventListener` on a `FILL_RECT` under the
- * board never fires (verified on a T-Rex 3 Pro), which is why the game page puts BUTTON
- * widgets over the tiles instead.
+ * Now that the theme is black this paints what a Zepp OS page already starts as, which
+ * makes it a no-op on every screen here - and it is kept anyway, because it is the one
+ * place a page's background is decided and a theme that ever stops being black would
+ * otherwise have to add it back to four pages at once.
+ *
+ * Not a touch surface - `addEventListener` on a `FILL_RECT` under the board never fires
+ * (verified on a T-Rex 3 Pro), which is why the game page puts BUTTON widgets over the
+ * tiles instead.
  */
 export function ground(color) {
   return hmUI.createWidget(hmUI.widget.FILL_RECT, {
@@ -44,17 +48,21 @@ export function text({ x, y, w, h, size, color, content, align, wrap }) {
   })
 }
 
-export function button({ x, y, w, h, label, onClick, primary }) {
+export function button({ x, y, w, h, size, label, onClick, primary }) {
+  const height = h === undefined ? BUTTON_H : h
   return hmUI.createWidget(hmUI.widget.BUTTON, {
     x: x === undefined ? CONTENT_X : x,
     y,
     w: w === undefined ? CONTENT_W : w,
-    h: h === undefined ? BUTTON_H : h,
-    radius: BUTTON_RADIUS,
+    h: height,
+    // Always a full pill. Derived rather than fixed so that the short buttons - the
+    // leaderboard's scope switch, the home screen's sound toggle - come out as round at
+    // the ends as the tall ones instead of as rectangles with a generous corner.
+    radius: Math.round(height / 2),
     normal_color: primary ? ACCENT : PANEL,
     press_color: primary ? ACCENT_INK : PANEL_PRESSED,
     color: primary ? ACCENT_INK : CREAM,
-    text_size: BODY_FONT,
+    text_size: size === undefined ? BODY_FONT : size,
     text: label,
     click_func: onClick,
   })
@@ -80,8 +88,15 @@ export function circle({ cx, cy, r, color }) {
   })
 }
 
-export function image({ x, y, w, h, src }) {
-  return hmUI.createWidget(hmUI.widget.IMG, { x, y, w, h, src })
+export function image({ x, y, w, h, src, alpha }) {
+  return hmUI.createWidget(hmUI.widget.IMG, {
+    x,
+    y,
+    w,
+    h,
+    src,
+    alpha: alpha === undefined ? 255 : alpha,
+  })
 }
 
 /** `setProperty(VISIBLE, …)` guarded, so a page can toggle a widget it may not have built. */
@@ -99,4 +114,24 @@ export function setColor(widget, color) {
 
 export function setSrc(widget, src) {
   if (widget) widget.setProperty(hmUI.prop.SRC, src)
+}
+
+/**
+ * Opacity, 0 to 255.
+ *
+ * There is no `prop.ALPHA`, so it goes through `prop.MORE` - which takes a partial bag of
+ * properties and leaves the rest alone, so this is a single-property write like the ones
+ * above rather than a redefinition of the widget.
+ */
+export function setAlpha(widget, alpha) {
+  if (widget) widget.setProperty(hmUI.prop.MORE, { alpha })
+}
+
+/**
+ * Moves a widget horizontally. Through `prop.MORE` for the same reason `setAlpha` is: it
+ * takes a partial bag of properties and leaves the rest alone, so this stays a
+ * single-property write rather than a redefinition of the widget.
+ */
+export function setX(widget, x) {
+  if (widget) widget.setProperty(hmUI.prop.MORE, { x })
 }

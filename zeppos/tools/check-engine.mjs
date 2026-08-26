@@ -19,9 +19,14 @@
 import {
   createEngine,
   COUNTDOWN_MS,
+  FRUITS,
   MAX_STRIKES,
   MAX_TARGETS,
   MAX_TICK_MS,
+  SPLAT_LIFE_MS,
+  SPLAT_VARIANTS,
+  SURVIVE_TIERS,
+  tiersCleared,
   TILE_COUNT,
   PHASE_RUNNING,
   PHASE_OVER,
@@ -30,7 +35,13 @@ import {
   spawnIntervalMs,
 } from '../shared/engine.js'
 
+import { existsSync } from 'node:fs'
+import { dirname, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
+
 const TICK = 40
+
+const ASSETS = resolve(dirname(fileURLToPath(import.meta.url)), '../assets/default.r')
 
 let failures = 0
 
@@ -175,6 +186,148 @@ for (const stepBy of [-5_000, -30_000]) {
   }
   check('the pace never eases off', monotonic)
   check('and never reaches zero', aboveFloor, `life ${fruitLifeMs(4999)}ms at level 4999`)
+}
+
+// -------------------------------------------------------------------- splats
+//
+// A splat is the only record of a hit that outlives the hit, and the page draws straight
+// from it - one bitmap widget per tile, named `splat-<fruit>-<variant>.png`. So a fruit
+// name or a variant the engine invents that the asset set does not have is not a wrong
+// colour, it is a missing file and a blank tile.
+{
+  const engine = createEngine(mulberry32(5))
+  let now = 1_700_000_000_000
+  let hits = 0
+  let badName = 0
+  let badVariant = 0
+  let wrongTile = 0
+  let wrongFruit = 0
+  let outlived = 0
+
+  engine.start(now)
+  for (let played = 0; played < 90_000 && engine.phase !== PHASE_OVER; played += TICK) {
+    now += TICK
+    engine.update(now)
+    if (engine.phase !== PHASE_RUNNING) continue
+
+    // Whatever is on the board, whacked the instant it appears.
+    for (const active of engine.slots.filter(Boolean)) {
+      const { tile, fruit } = active
+      if (!engine.tap(tile, now)) continue
+      hits++
+      const splat = engine.splats[tile]
+      if (!splat) {
+        wrongTile++
+        continue
+      }
+      if (splat.fruit !== fruit) wrongFruit++
+      if (!FRUITS.includes(splat.fruit)) badName++
+      if (!(splat.variant >= 0 && splat.variant < SPLAT_VARIANTS)) badVariant++
+    }
+
+    for (let tile = 0; tile < TILE_COUNT; tile++) {
+      const splat = engine.splats[tile]
+      if (splat && now - splat.bornMs > SPLAT_LIFE_MS) outlived++
+    }
+  }
+
+  check('every hit leaves a splat on the tile it was hit on', wrongTile === 0, `${hits} hits`)
+  check('and the splat is the fruit that was whacked', wrongFruit === 0)
+  check('splat fruit names all have sprites', badName === 0)
+  check('splat variants stay inside the set', badVariant === 0, `0..${SPLAT_VARIANTS - 1}`)
+  check('no splat outlives SPLAT_LIFE_MS', outlived === 0, `${outlived} overstayed`)
+}
+
+// A splat holds an absolute birth time like everything else here, so a clock step has to
+// carry it too. What is checked is the *age*, not whether the splat survives: a step is
+// absorbed down to one tick of real time, and a tick may be MAX_TICK_MS, which is longer
+// than a splat lives - so a forward step legitimately ages every splat out, and counting
+// survivors would be asserting that decoration outlives the rule that governs it.
+//
+// The failure this does catch is the backward one, which has no such excuse: unshifted,
+// a splat's birth ends up in the future, its age goes negative, the expiry test never
+// fires and it sits on the board for as long as the correction was wide.
+for (const stepBy of [-5 * 60_000, -30_000, 30_000]) {
+  const engine = createEngine(mulberry32(9))
+  let now = 1_700_000_000_000
+  engine.start(now)
+  for (let i = 0; i < 200; i++) {
+    now += TICK
+    engine.update(now)
+    const live = engine.slots.filter(Boolean)
+    if (live.length) engine.tap(live[0].tile, now)
+  }
+  const before = engine.splats.map((s) => (s ? now - s.bornMs : null))
+
+  now += stepBy + TICK
+  engine.update(now)
+
+  let drifted = 0
+  let inFuture = 0
+  for (let tile = 0; tile < TILE_COUNT; tile++) {
+    const splat = engine.splats[tile]
+    if (!splat) continue
+    const age = now - splat.bornMs
+    if (age < 0) inFuture++
+    // Every surviving splat must have aged by the real time that passed - one tick -
+    // and by no more, whatever the clock did.
+    if (before[tile] === null || Math.abs(age - before[tile] - TICK) > TICK) drifted++
+  }
+  check(
+    `a ${stepBy / 1000}s clock step carries the splats with it`,
+    inFuture === 0 && drifted === 0,
+    `${inFuture} in the future, ${drifted} drifted`,
+  )
+}
+
+// A fresh run starts on a clean board, whatever the last one left on it.
+{
+  const engine = createEngine(mulberry32(13))
+  let now = 1_700_000_000_000
+  engine.start(now)
+  for (let i = 0; i < 200; i++) {
+    now += TICK
+    engine.update(now)
+    const live = engine.slots.filter(Boolean)
+    if (live.length) engine.tap(live[0].tile, now)
+  }
+  const left = engine.splats.filter(Boolean).length
+  engine.start(now)
+  check(
+    'starting a run clears the last one’s splats',
+    engine.splats.every((s) => s === null),
+    `${left} were on the board`,
+  )
+}
+
+// ------------------------------------------------------------- survival tiers
+//
+// The result screen builds a file name out of every tier it is given
+// (`badge-<seconds>.png`), so a tier with no art is not an error anywhere - it is a gap
+// in a centred row, on the one screen a player looks at after doing something well.
+{
+  let ascending = true
+  for (let i = 1; i < SURVIVE_TIERS.length; i++) {
+    if (SURVIVE_TIERS[i] <= SURVIVE_TIERS[i - 1]) ascending = false
+  }
+  check('the survival tiers climb', ascending, SURVIVE_TIERS.join(' < '))
+
+  const missing = SURVIVE_TIERS.map((tier) => 'badge-' + tier / 1000 + '.png')
+    .concat('badge-best.png')
+    .filter((name) => !existsSync(resolve(ASSETS, name)))
+  check(
+    'every tier has a badge, and so does a new best',
+    missing.length === 0,
+    missing.length ? 'missing ' + missing.join(', ') : SURVIVE_TIERS.length + 1 + ' present',
+  )
+
+  // Boundaries, because "above 30 seconds" and "30 seconds" are the same run to a player
+  // and the badge has to agree with the number printed above it.
+  const top = SURVIVE_TIERS[SURVIVE_TIERS.length - 1]
+  check('a run of exactly one tier earns it', tiersCleared(SURVIVE_TIERS[0]).length === 1)
+  check('a millisecond short earns nothing', tiersCleared(SURVIVE_TIERS[0] - 1).length === 0)
+  check('a run past the top earns them all', tiersCleared(top + 1).length === SURVIVE_TIERS.length)
+  check('and a zero-length run earns none', tiersCleared(0).length === 0)
 }
 
 // A quit during the countdown is not a run, and must not submit a score.

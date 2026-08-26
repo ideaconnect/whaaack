@@ -11,9 +11,12 @@
  *
  *   - a 3x3 board instead of 4x4, so nine tiles rather than sixteen;
  *   - five concurrent fruit at the very top instead of sixteen;
- *   - no splats, no outro animation, no pause/resume - a watch app that loses the
- *     foreground has lost the run, and pretending otherwise would bank a score the
- *     player did not finish;
+ *   - one splat per tile rather than a list of them, because a watch draws with widgets
+ *     rather than a canvas: a splat is a bitmap that lives on a tile for as long as it is
+ *     fading, and a second hit on the same tile replaces it;
+ *   - no outro animation, no pause/resume - a watch app that loses the foreground has
+ *     lost the run, and pretending otherwise would bank a score the player did not
+ *     finish;
  *   - a single tap ends a run early (the phone's two-press arming guards against a
  *     fumbled thumb an inch below a 4x4 board; here the control is the hardware BACK
  *     button, which is nowhere near the tiles).
@@ -110,13 +113,65 @@ const SPAWN_SPACING_MS = 120
 const STRIKE_GRACE_MS = 450
 
 /**
- * How long a whacked tile stays lit, and stays out of the spawn pool.
+ * How long a whacked tile stays out of the spawn pool.
  *
- * Doing both with one number is deliberate. The flash is the only hit feedback the
- * board gives, and a fruit landing on the tile that is mid-flash would eat it - the
- * player would see one animation and have to guess which event it belonged to.
+ * The splat outlives this several times over on purpose - it is decoration, and a tile
+ * wearing one is a perfectly good place to put the next fruit. What this protects is the
+ * *moment of the hit*: a fruit that landed instantly on the tile just cleared would be
+ * indistinguishable from the one that was whacked, and the player would have to guess
+ * which of the two the splat under it belonged to.
  */
 export const HIT_FLASH_MS = 220
+
+/**
+ * How long a splat stays on its tile, and the fraction of that it holds full strength
+ * before fading out.
+ *
+ * The phone gives a splat 1100ms. A watch is a third of the size and the fruit come at it
+ * about as fast, so the same number leaves the board permanently smeared - at five hits a
+ * second every tile would be wearing one at all times, and the thing that is supposed to
+ * mark a hit would stop marking anything. Seven hundred is long enough to read at a
+ * glance and short enough that the board is mostly clean.
+ */
+export const SPLAT_LIFE_MS = 700
+export const SPLAT_HOLD = 0.45
+
+/**
+ * Splat shapes per fruit, baked by tools/generate_zepp_assets.py.
+ *
+ * The phone picks one of thirty-six masks and rotates it by a random angle, because it
+ * tints and rotates at draw time. A watch can do neither: the colour has to be baked into
+ * the bitmap and so does the angle, so each variant is a *file* and the count is a bundle
+ * size rather than a free parameter. Three per fruit is thirty-six sprites - enough that
+ * consecutive hits on one tile rarely repeat, at a fifth of the bytes the phone's count
+ * would cost.
+ */
+export const SPLAT_VARIANTS = 3
+
+/**
+ * The run lengths worth marking, in milliseconds.
+ *
+ * The same four the phone game's Play Games achievements use, which is why there is
+ * already art for them: `tools/generate_zepp_assets.py` cuts `badge-<seconds>.png` from
+ * `assets/achievements/survive-<seconds>.png`, naming the files from this list. A tier
+ * added here without art is a blank space on the result screen.
+ *
+ * They land well against this curve rather than by coincidence - `tools/simulate.mjs`
+ * prints how often each grade reaches each of them, and the four sort the grades out
+ * almost exactly: a casual run clears the first and nothing else, a good one gets three,
+ * and only an expert closes the ring. Change the curve and that report is where to look
+ * before deciding these are still the right four.
+ */
+export const SURVIVE_TIERS = [30000, 60000, 90000, 120000]
+
+/** Which of them a run of `millis` reached, longest last. */
+export function tiersCleared(millis) {
+  const cleared = []
+  for (let i = 0; i < SURVIVE_TIERS.length; i++) {
+    if (millis >= SURVIVE_TIERS[i]) cleared.push(SURVIVE_TIERS[i])
+  }
+  return cleared
+}
 
 /** Remaining fraction of its life at which a fruit's tile starts warning. */
 export const WARN_FRACTION = 0.38
@@ -217,8 +272,16 @@ export function createEngine(random) {
     countdownValue: 0,
     /** Nulls and `{ tile, fruit, bornMs, lifeMs }`; index is the slot, not the tile. */
     slots: new Array(MAX_TARGETS).fill(null),
-    /** When each tile was last whacked, so the flash and the spawn cooldown agree. */
+    /** When each tile was last whacked, so the spawn cooldown has something to measure. */
     clearedAt: new Array(TILE_COUNT).fill(0),
+    /**
+     * Nulls and `{ fruit, variant, bornMs }`, indexed by tile.
+     *
+     * One slot per tile rather than a growing list: a second hit on a tile that is still
+     * wearing a splat replaces it, which is what the page can draw anyway - it holds one
+     * bitmap widget per tile and a widget can only show one thing.
+     */
+    splats: new Array(TILE_COUNT).fill(null),
     /** True when the run ended because the player left rather than lost. */
     quit: false,
 
@@ -280,6 +343,10 @@ export function createEngine(random) {
     for (let i = 0; i < engine.clearedAt.length; i++) {
       if (engine.clearedAt[i] !== 0) engine.clearedAt[i] += jump
     }
+    for (let i = 0; i < engine.splats.length; i++) {
+      const splat = engine.splats[i]
+      if (splat) splat.bornMs += jump
+    }
   }
 
   function start(now) {
@@ -291,6 +358,7 @@ export function createEngine(random) {
     engine.quit = false
     engine.slots.fill(null)
     engine.clearedAt.fill(0)
+    engine.splats.fill(null)
     countdownEndsMs = now + COUNTDOWN_MS
     engine.countdownValue = COUNTDOWN_MS / 1000
     openTargets = BASE_TARGETS
@@ -325,6 +393,15 @@ export function createEngine(random) {
 
     const lifeMs = fruitLifeMs(engine.level)
     let struck = false
+
+    // Dropped rather than left to the page to age out, so what the engine holds is what
+    // is actually on the board. The page still checks the age - it fades a splat across
+    // its life and needs the number anyway - but it never has to wonder whether a splat
+    // it can see is one the engine still believes in.
+    for (let i = 0; i < TILE_COUNT; i++) {
+      const splat = engine.splats[i]
+      if (splat && now - splat.bornMs >= SPLAT_LIFE_MS) engine.splats[i] = null
+    }
 
     while (openTargets < targetsAtLevel(engine.level)) {
       // A newly opened slot gets the same delayed, jittered entry every other slot gets
@@ -452,6 +529,11 @@ export function createEngine(random) {
       engine.slots[i] = null
       engine.hits++
       engine.clearedAt[tile] = now
+      engine.splats[tile] = {
+        fruit: active.fruit,
+        variant: Math.floor(rand() * SPLAT_VARIANTS),
+        bornMs: now,
+      }
       scheduleRespawn(i, now)
       return true
     }
