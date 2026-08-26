@@ -78,12 +78,3 @@ msgstr " of "
 
 msgid "noRankedRun"
 msgstr "No ranked run yet."
-
-msgid "soundOn"
-msgstr "Sound on"
-
-msgid "soundOff"
-msgstr "Sound off"
-
-msgid "soundNone"
-msgstr "No sound"

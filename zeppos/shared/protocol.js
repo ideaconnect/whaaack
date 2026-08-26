@@ -103,26 +103,6 @@ export const KEY_SESSION = 'session'
 /** Best run this watch has seen, whether or not it was ever ranked. */
 export const LOCAL_BEST = 'best'
 
-/**
- * Whether the game makes any sound, as `1` or `0`. Absent means on.
- *
- * On the watch rather than in the phone's settings page, where the account lives, because
- * this is the one preference a player may want to change without their phone in reach -
- * the point of turning the sound off is usually that somebody has just walked in. A
- * setting that needed the Zepp app to change would be no use at that moment.
- */
-export const LOCAL_SOUND = 'sound'
-
-/**
- * `'1'` once this watch has actually played something, `'0'` once it has refused outright.
- * Absent until either has happened.
- *
- * Whether a watch can play audio at all is only discoverable on the game page, a second or
- * two after it opens - and the place a player asks the question is the home screen, where
- * the toggle would otherwise go on offering sound that they have already found out is not
- * coming. Remembering the answer is what lets that button stop lying.
- */
-export const LOCAL_SOUND_OK = 'soundOk'
 
 // ------------------------------------------------------------------------- statuses
 

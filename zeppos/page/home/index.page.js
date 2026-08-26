@@ -7,19 +7,12 @@ import { BasePage } from '@zeppos/zml/base-page'
 
 import { REQ_AUTH, LOCAL_BEST } from '../../shared/protocol.js'
 import { secondsLabel } from '../../shared/format.js'
-import { soundOn, setSoundOn, soundKnownBroken } from '../../shared/audio.js'
 import { ACCENT, CREAM_DIM, CREAM_FAINT } from '../../shared/theme.js'
 import {
   SCREEN_W,
   TITLE_FONT,
   BODY_FONT,
   CAPTION_FONT,
-  BEST_X,
-  BEST_W,
-  SOUND_X,
-  SOUND_Y,
-  SOUND_W,
-  SOUND_H,
   // Where this page's rows sit. In layout.js rather than here because the answer differs
   // between a round screen and a square one, and only that file knows which this is.
   HOME_TITLE_Y as TITLE_Y,
@@ -33,7 +26,6 @@ import {
 import { ground, text, button, setText, hideStatusBar } from '../../shared/widgets.js'
 
 let bestLabel = null
-let soundButton = null
 let accountLabel = null
 
 /** False once the page is gone; the account lookup is a round trip to the phone. */
@@ -73,27 +65,14 @@ Page(
         content: getText('tagline'),
       })
 
-      // Left-aligned rather than centred, because it now shares its band with the sound
-      // toggle: two things centred on one line read as one wobbly thing.
+      // Centred, and alone on its line again. It shared this band with a sound toggle
+      // until the game stopped making any.
       bestLabel = text({
-        x: BEST_X,
         y: BEST_Y,
-        w: BEST_W,
         h: BODY_FONT + px(8),
         size: BODY_FONT,
         color: CREAM_DIM,
-        align: hmUI.align.LEFT,
         content: bestText(),
-      })
-
-      soundButton = button({
-        x: SOUND_X,
-        y: SOUND_Y,
-        w: SOUND_W,
-        h: SOUND_H,
-        size: CAPTION_FONT,
-        label: soundText(),
-        onClick: () => this.toggleSound(),
       })
 
       button({
@@ -128,31 +107,14 @@ Page(
     },
 
     onResume() {
-      // Coming back from a run: the best may have moved, a sign-in may have happened on
-      // the phone while the watch was showing something else, and the run just played is
-      // the only thing that can have discovered whether this watch can make a noise.
+      // Coming back from a run: the best may have moved, and a sign-in may have happened
+      // on the phone while the watch was showing something else.
       //
-      // All three have to be re-read here and nowhere else. The game page is opened with
+      // Both have to be re-read here and nowhere else. The game page is opened with
       // `push`, so this page is never torn down and `build` never runs a second time - a
-      // label written once at build time is written for the lifetime of the app. The
-      // sound one was missed on the first pass, which left the toggle promising "Sound
-      // on" over a watch that had refused outright a minute earlier: exactly the state
-      // the whole `soundOk` record exists to report.
+      // label written once at build time is written for the lifetime of the app.
       setText(bestLabel, bestText())
-      setText(soundButton, soundText())
       this.refreshAccount()
-    },
-
-    /**
-     * Flips the sound and says so on the button.
-     *
-     * Written to local storage rather than held here, because every page that makes a
-     * noise reads it fresh: the game page is a separate module with its own lifetime, and
-     * a preference in a variable would not survive the walk between the two.
-     */
-    toggleSound() {
-      setSoundOn(!soundOn())
-      setText(soundButton, soundText())
     },
 
     refreshAccount() {
@@ -179,16 +141,3 @@ function bestText() {
   return best > 0 ? getText('best') + secondsLabel(best) : getText('noRunsYet')
 }
 
-/**
- * What the toggle says.
- *
- * Three labels for two states, because a watch that will not play anything is worth saying
- * out loud: the alternative is a button that reads "Sound on" over a game that has never
- * made a noise, which sends a player looking for the volume control they do not have.
- * Whether it plays is only discoverable during a run, so the answer is remembered from the
- * last one (see `soundKnownBroken`).
- */
-function soundText() {
-  if (!soundOn()) return getText('soundOff')
-  return soundKnownBroken() ? getText('soundNone') : getText('soundOn')
-}

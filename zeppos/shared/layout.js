@@ -83,13 +83,6 @@ const ROUND = {
   margin: 52,
   buttonH: 74,
 
-  bestX: 58,
-  bestW: 196,
-  soundX: 268,
-  soundY: 144,
-  soundW: 154,
-  soundH: 46,
-
   titleFont: 38,
   bodyFont: 28,
   captionFont: 24,
@@ -161,14 +154,6 @@ const SQUARE = {
 
   margin: 24,
   buttonH: 72,
-
-  // 24 + 180 = 204, then the pill from 216 to 366, leaving the same 24 on the right.
-  bestX: 24,
-  bestW: 180,
-  soundX: 216,
-  soundY: 130,
-  soundW: 150,
-  soundH: 46,
 
   titleFont: 36,
   bodyFont: 26,
@@ -306,26 +291,6 @@ export const CONTENT_X = MARGIN
 export const CONTENT_W = SCREEN_W - MARGIN * 2
 
 export const BUTTON_H = px(M.buttonH)
-
-/**
- * The home screen's status row: the local best on the left, the sound toggle on the
- * right, sharing the band between the tagline and the Play button.
- *
- * It goes here rather than under the two menu buttons because the bottom of a round
- * screen is already spoken for - the account line wraps to two, ends at y=414 where the
- * glass is 330px wide, and there is no third line's worth of chord under it. This band is
- * the widest unspent space on the page: at y=190 the glass is 443px across, so a 154px
- * pill sits at x=268 with its far corner 206px from the centre.
- *
- * On square the band is the same idea and none of the arithmetic: the pill runs to 366 of
- * 390, leaving the same 24px margin the rest of the page uses.
- */
-export const BEST_X = px(M.bestX)
-export const BEST_W = px(M.bestW)
-export const SOUND_X = px(M.soundX)
-export const SOUND_Y = px(M.soundY)
-export const SOUND_W = px(M.soundW)
-export const SOUND_H = px(M.soundH)
 
 export const TITLE_FONT = px(M.titleFont)
 export const BODY_FONT = px(M.bodyFont)

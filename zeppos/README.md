@@ -23,7 +23,7 @@ numbers, so:
 ## What is on the watch
 
 ```
-page/home    Play · Leaderboard · the sound toggle · who is signed in
+page/home    Play · Leaderboard · your best · who is signed in
 page/game    the run, and the result it ends on
 page/board   the Zepp board, all-time or this week, and your standing
 ```
@@ -321,116 +321,35 @@ it in a unit nobody compares runs in; the hits it shared a line with moved up be
 best. The bottom of the screen is set by the glass rather than by taste: Play again ends at
 y=412, where its far corner is 235px from the centre and the rim is at 240.
 
-## Sound
+## Why there is no sound
 
-The watch makes one sound: the splat. There is no music, and there is not going to be.
+There was, three times over, and it was bad every time. The watch is silent now and a hit
+answers with the vibration motor instead (`VIBRATOR_SCENE_SHORT_STRONG`, on the game page),
+which is the feedback that survived.
 
-`@zos/media` arrived in Zepp OS 3.0 and takes MP3. It is a *media player*, not a sound
-bank: one source at a time, `setSource` then an asynchronous `prepare()` before anything
-will `start()`. And there is exactly **one of it per app** — the second `create` returns
-`undefined`, with `js player instance already created, can't create new one` on the device
-side. Not a throw, not a message the caller can see.
+Worth writing down, because the next person to reach for `@zos/media` should know what is
+waiting:
 
-The splat claimed that one player, correctly — the sound worth spending a single voice on
-is the one that answers a tap, because a hit that makes no sound is a hit that feels like
-it missed. Which meant the music lost the race on every device and on every run, and had
-never once played on anybody's wrist. It is gone: a 206KB file out of the package, and out
-of this repository the loop-building that produced it (an exact number of musical units so
-the wrap landed on a downbeat, an equal-power crossfade across the seam). Both were
-correct, and both solved a problem the watch does not have.
+* **One player per app.** The second `create` returns `undefined` — not a throw — logging
+  `js player instance already created, can't create new one` on the device. There is no
+  mixing, so two sounds cannot overlap, ever. A music track sat in this repository for
+  weeks costing 206KB and never played a note, because the splat claimed the only player
+  first.
+* **Failure is reported by returning `false`.** `start()`, `seek()` and `stop()` do not
+  throw. A guard that only catches exceptions sees a silent success, which is how the first
+  version shipped playing nothing.
+* **`stop()` unloads the file** rather than pausing it — the status drops to INITIALIZED
+  and `start()` from there answers false. So the obvious retrigger, stop-then-start, takes
+  the player apart; the way back is a reload, and that reload is the lag.
+* **`seek(0)` answers `true` and does nothing audible.** It looks exactly like the way to
+  retrigger a sample. It is not one.
+* **None of this is reachable in the simulator**, which has no audio device: `prepare()`
+  never leaves PREPARING, so every path past "the file is loaded" is unexercised there.
 
-There is also one splat sound rather than the phone's nine, since picking a file per hit is
-a re-prepare this design cannot afford; the variety moved into the sprites instead.
-
-A watch with no speaker at all throws out of `create`, and there is nothing more to try.
-That is a different case from a refused player, and reading the two the same way would tell
-a player their watch is mute when it is working perfectly. Now that nothing else in the app
-asks for a player, a refusal means something *outside* the game is holding the device's
-only one — so it is deliberately not recorded as "this watch cannot play audio".
-
-`release()` does give the one instance back, but not on the same tick — releasing and
-re-creating immediately still fails, while releasing on the way out of the game page and
-creating again on the way back in works every time.
-
-### What the platform does that the documentation does not say
-
-All three found by probing a running device, and all three load-bearing:
-
-1. **`start()`, `seek()` and `stop()` report failure by returning `false`, not by throwing.**
-   A guard that only catches exceptions sees a silent success.
-
-2. **`stop()` does not pause a loaded file — it unloads it.** The status drops from
-   PREPARED back to INITIALIZED, and `start()` from there answers `false`. So "stop it and
-   start it again", the obvious way to retrigger a sample, is precisely the thing that
-   cannot be done: it takes the player apart.
-
-3. **`seek(percentage)` is the retrigger.** It leaves the player started and moves the
-   playhead, which is what "cut this splat short and play it again" actually means here.
-
-Points 1 and 2 together were a real bug, and shipped: `playSplat` stopped the player before
-starting it, so every hit unloaded the file and then failed to start it, in silence, with
-no exception for anything to catch. On a wrist it presented as splats that lagged behind
-the tap and refused to overlap — a hit during a splat was simply lost.
-
-**What the sound promises now.** Every whack that lands is heard. On one voice that means
-the newest hit takes it: a whack arriving while the last splat is still sounding seeks back
-to the top and cuts it short, rather than queueing behind it or being dropped. Nothing on
-that path stops the player. The old 90ms merge window — "two hits closer than this share
-one sound" — was the right trade only while retriggering was broken, and is now a 50ms
-floor against a double-fire in a single frame, which two taps on two tiles cannot reach
-anyway. In the one case where the player refuses a start, the file goes back in and the hit
-is *chased* rather than dropped, but only for 140ms: a splat arriving a third of a second
-after its fruit reads as a fault rather than as feedback.
-
-The status codes are not hard-coded. Only three were ever observed (IDLE 0, INITIALIZED 1,
-PREPARING 2) and guessing the rest from the documentation's ordering would be a guess in
-the one place that decides whether a sound plays, so the player is asked what it reports at
-the one moment it is certainly loaded — inside its own `PREPARE` handler — and that number
-is remembered. Whether a sound is still *sounding* is not read from the player at all: it
-is kept by the clock, because a status read straight after `start()` can report a
-transitional state that never recurs.
-
-[`tools/check-audio.mjs`](tools/check-audio.mjs) runs the real `audio.js` against a fake
-device built from that probe ([`tools/fake-media.js`](tools/fake-media.js)), because the
-simulator cannot answer any of this — it has no audio device, so `prepare()` never leaves
-PREPARING and every path past "the file is loaded" is unreachable there, which is exactly
-where the bug lived. It exercises both plausible devices, since one thing still cannot be
-settled without hardware: whether playback ending leaves the file loaded or unloads it the
-way `stop()` does. The code has to be right either way, and the check fails 15 times
-against the version that shipped.
-
-It is behind one toggle on the home screen, kept in the watch's own local storage rather
-than in the phone's settings page — the moment you want the sound off is usually the moment
-somebody walked in, and a setting that needed the Zepp app would be no use then. Switching
-it off stops the player, which unloads the file, so switching it back on puts the file in
-again before the next whack asks for it.
-
-**Two ways to hear nothing, and both are guarded now.**
-
-The `PREPARE` event is documented twice and the two disagree: one reference hands the
-callback an object and tests `result.isReady`, and the platform's own current example tests
-the argument itself for truth and calls `start()` on that. A guard written for only the
-first reads a bare `true` as a failure and never starts anything — total silence, on every
-sound, with nothing in the log but a line claiming the file would not prepare. That was the
-first version of this file, and it is why the first build to reach a real watch made no
-noise at all. Anything truthy now counts, unless it is an object that explicitly says
-otherwise.
-
-And the event may simply never come. The simulator never sends it, so a run there used to
-sit at "loaded but not ready" for ever. A watch that loads the file and stays quiet for
-that reason is indistinguishable from one that cannot play at all, so after
-`PREPARE_GRACE_MS` the sound is armed and played anyway — of the two possible mistakes,
-starting a sound that was not quite ready is much the smaller.
-
-**Still unverified on hardware.** The simulator has no audio device, so `prepare()` never
-leaves PREPARING and nothing past "the file is loaded" happens there at all — which is why
-the bug above survived it, and why [`tools/check-audio.mjs`](tools/check-audio.mjs) exists.
-What the simulator can still show is the front of the path: the player is created, the file
-is set, and the grace timer arms the sound when no PREPARE event ever arrives. Whether a
-speaker then moves is not a question a simulator can answer. When a watch will not play, the home screen's
-toggle says **No sound** rather than going on offering something the watch has already
-refused — the outcome is remembered across pages in local storage, because it is only
-discoverable during a run.
+The last attempt worked, as far as a bench can tell — a 150ms sample, whacks held rather
+than dropped, and a check suite driving a fake device built from a probe of the real engine.
+It still sounded bad on a wrist, which is the one thing none of that could measure. That is
+the whole lesson: the platform was the smaller problem.
 
 ## Building it
 
@@ -452,11 +371,10 @@ and that is not tidiness: `zeus dev` rewrites `zeppos/.gitignore` with its own d
 every run. Silently, and on a *watch* run — so it happens minutes after anyone last looked at
 the file. Anything you add here will be gone by the next build; put it in the root.
 
-Bitmaps and sounds both come from what the phone game already ships:
+The bitmaps come from what the phone game already ships:
 
 ```bash
 python ../tools/generate_zepp_assets.py --preview   # fruit, 36 splats, the icon
-python ../tools/generate_zepp_audio.py              # splat.mp3 (needs ffmpeg)
 ```
 
 ## Checking the backend
@@ -539,12 +457,10 @@ That rescaling is also why there are two asset folders. `assets/default.r` and
 `assets/default.s` hold the same pictures drawn for two different design spaces: a square
 tile is 104 design pixels against the round 92, so its fruit is drawn at 72 rather than 64
 and its splat at 122 rather than 108. Everything measured against the screen rather than
-against a tile — the badges, the icon, the tap target — and the splat sound, which sounds
-the same on any shape, are identical in both. Writing the sound to only one folder is not a
-smaller package but a silent watch, which is how the first square build shipped.
+against a tile — the badges, the icon, the tap target — is identical in both.
 
-Sound needs a speaker, which not every one of them has, and the game is written to be
-played silently on the ones that do not.
+Nothing here needs a speaker: the game is silent on every device and answers a hit with the
+vibration motor. See [why there is no sound](#why-there-is-no-sound).
 
 One trap worth knowing when running against the simulator: a build is tied to the *device*
 it was made for, and the simulator refuses — silently, in v2.1.2, because its own notice

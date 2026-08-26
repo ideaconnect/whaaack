@@ -22,7 +22,6 @@ import {
 } from '../../shared/engine.js'
 import { REQ_SUBMIT, LOCAL_BEST } from '../../shared/protocol.js'
 import { seconds, secondsLabel } from '../../shared/format.js'
-import { primeSplat, playSplat, release as releaseAudio } from '../../shared/audio.js'
 import {
   CREAM,
   CREAM_DIM,
@@ -223,12 +222,6 @@ Page(
       // not watch.
       pauseDropWristScreenOff({ duration: 0 })
 
-      // Asynchronous, and not worth waiting for: the file is loaded now so that the first
-      // hit of the first run sounds as promptly as the hundredth. Here rather than in
-      // `startRun` because the player is claimed for the whole visit - reclaiming it on
-      // every Play again would cost the first hit of every run after the first.
-      primeSplat()
-
       // A run in progress swallows Back and ends the run instead; a second Back then
       // leaves, because by that point there is nothing to protect. The same rule for the
       // gesture and for the hardware button - a T-Rex has both, and a player who has just
@@ -251,9 +244,6 @@ Page(
       offKey()
       resetPageBrightTime()
       resetDropWristScreenOff()
-      // The one call that has to happen. A page that leaves without it keeps the audio
-      // route open and the speaker powered, and holds the device's only media player.
-      releaseAudio()
     },
 
     startRun() {
@@ -291,11 +281,7 @@ Page(
       if (engine.phase !== PHASE_RUNNING) return
       const now = Date.now()
       if (!engine.tap(tile, now)) return
-      // Rendered before the sound, because the splat is the feedback that has to be
-      // immediate: `playSplat` is a call into the media stack and a miss there must not
-      // hold up the frame that shows the hit landed.
       renderFrame(now)
-      playSplat(now)
     },
 
     /**
