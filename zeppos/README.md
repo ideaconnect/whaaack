@@ -344,6 +344,16 @@ Deeper has to mean longer here. The three short scenes are all 20ms and differ o
 strength, and there is no frequency control anywhere in `@zos/sensor`, so grading a strike
 by strength alone makes it feel like a firmer hit rather than a different kind of event.
 
+Both go through **`start({ mode })`**, the one-call form, rather than `setMode()` followed
+by `start()`. The two-call form buzzed more than once for a single whack — whether because
+setting the mode fires the motor itself, or because a `start()` on a mode already set
+repeats it, is not visible from this end. One call does one thing.
+
+One buzz per whack is also enforced structurally rather than by a time window: the buzz is
+keyed to `engine.hits`, so a new value is a new fruit no matter how many times the touch
+layer decides a finger landed. A window is a guess about how fast taps can arrive, and it is
+still a guess when the answer has to be exactly one.
+
 **`stop()` is deliberately not called before starting either of them.** It was, on the miss,
 on the theory that a mode set mid-pulse might not take — and the miss came out *delicate*
 while the hit, which never stopped anything, came out solid. Stopping the motor and

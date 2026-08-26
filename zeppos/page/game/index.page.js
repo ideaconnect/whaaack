@@ -174,12 +174,18 @@ const vibrator = new Vibrator()
  * to be buzzed at about something the screen has already said, and it landed immediately
  * after the strike that caused it - so the last thing a run did was talk over itself.
  *
- * `stop()` is deliberately not called before starting either of these. It was, on the
- * miss, on the theory that a mode set mid-pulse might not take - and the miss came out
- * *delicate* while the hit, which never stopped anything, came out solid. Stopping the
- * motor and immediately restarting it appears to swallow the start, which is the same
- * shape of trap as `stop()` unloading the media player: the call that looks like it makes
- * the next one reliable is the one that loses it.
+ * Both go through `start({ mode })`, the one-call form, rather than `setMode()` followed
+ * by `start()`. The two-call form buzzed more than once for a single whack - whether
+ * because setting the mode fires the motor itself, or because a `start()` on a mode that
+ * is already set repeats it, is not something this end can see. What is visible is that
+ * one call does one thing, and the API documents that shape.
+ *
+ * `stop()` is deliberately not called before either. It was, on the miss, on the theory
+ * that a mode set mid-pulse might not take - and the miss came out *delicate* while the
+ * hit, which never stopped anything, came out solid. Stopping the motor and immediately
+ * restarting it appears to swallow the start, which is the same shape of trap as `stop()`
+ * unloading the media player: the call that looks like it makes the next one reliable is
+ * the one that loses it.
  *
  * DURATION stops on its own after 600ms. VIBRATOR_SCENE_CALL and _TIMER are the two that
  * run until `stop()` is called, and neither belongs in a game.
@@ -194,6 +200,16 @@ const vibrator = new Vibrator()
  * cause that.
  */
 const HIT_MIN_GAP_MS = 55
+
+/**
+ * The whack this motor has already answered.
+ *
+ * A time window is the wrong instrument for "once per fruit": it is a guess about how fast
+ * taps can arrive, and it is still a guess when the answer has to be exactly one. The hit
+ * counter is the fruit's own identity, so a buzz per new value is one buzz per whack no
+ * matter how many times the touch layer decides a finger landed.
+ */
+let lastBuzzedHit = 0
 
 /**
  * How long a strike keeps the motor to itself: exactly as long as its own buzz.
@@ -212,12 +228,13 @@ let lastHitBuzzMs = 0
 let motorHeldUntil = 0
 
 function buzz(mode) {
-  vibrator.setMode(mode)
-  vibrator.start()
+  vibrator.start({ mode })
 }
 
-/** A whack landed: one short tap, and nothing that outlives the next one. */
+/** A whack landed: one short light tap, once, and over before the next whack. */
 function buzzHit(now) {
+  if (engine.hits === lastBuzzedHit) return
+  lastBuzzedHit = engine.hits
   if (now < motorHeldUntil) return
   if (now - lastHitBuzzMs < HIT_MIN_GAP_MS) return
   lastHitBuzzMs = now
@@ -322,6 +339,10 @@ Page(
 
     startRun() {
       submitted = false
+      // The counter restarts with the run, so the marker has to as well: a run whose
+      // predecessor ended on the same hit count would have its first whack answered by
+      // nothing, having apparently already been buzzed for.
+      lastBuzzedHit = 0
       resetShown()
       showBoard(true)
       showResult(false)
