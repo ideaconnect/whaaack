@@ -28,6 +28,7 @@ import {
   KEY_AUTH_REQUEST,
   KEY_AUTH_STATUS,
   KEY_SESSION,
+  AUTH_RESET_SENT,
   SCOPE_ALL_TIME,
   SCOPE_WEEKLY,
 } from '../shared/protocol.js'
@@ -44,14 +45,33 @@ function secrets() {
   return { url: grab('SUPABASE_URL'), anonKey: grab('SUPABASE_ANON_KEY') }
 }
 
-/** The side service's `fetch` shape, on top of Node's. */
+/**
+ * The side service's `fetch` shape, on top of Node's, keeping the URLs it was asked for.
+ *
+ * The URLs matter here as much as the answers. `redirect_to` is where an emailed link
+ * lands, GoTrue *silently* falls back to `site_url` when the value is not on the project's
+ * allow list, and the whole failure is invisible from this side: the call succeeds, the
+ * mail is sent, and the only symptom is a player tapping a link that opens an app they do
+ * not have. Nothing but the outgoing URL can catch that.
+ */
+const called = []
+
 async function sideFetch({ url, method, headers, body }) {
+  called.push(url)
   const response = await globalThis.fetch(url, { method, headers, body })
   return {
     status: response.status,
     statusText: response.statusText,
     body: await response.text(),
   }
+}
+
+/** The last request whose path contains `fragment`, or undefined. */
+function lastCall(fragment) {
+  for (let i = called.length - 1; i >= 0; i--) {
+    if (called[i].includes(fragment)) return called[i]
+  }
+  return undefined
 }
 
 function memoryStorage() {
@@ -128,6 +148,104 @@ async function main() {
   const badName = await api.signUp('someone@example.invalid', 'orchard42', '-nick-')
   check('signUp refuses a bad name before the network', badName.created === false, badName.message)
 
+  // -------------------------------------------------------- password, signed out
+  //
+  // Both of these have to refuse without a session, and refuse for the right reason. A
+  // change-password that quietly did nothing would be the worst outcome: `authorized`
+  // falls back to the anon key when there is no token, and PostgREST answers that with an
+  // empty success rather than a 401 - which is exactly how the phone game once managed to
+  // report a change of nothing as a change.
+  const noSession = await api.changePassword('orchard42')
+  check(
+    'a password change is refused when nobody is signed in',
+    noSession.changed === false && noSession.reason === 'signed_out',
+    noSession.reason,
+  )
+
+  check('a malformed address never reaches the reset endpoint', !!validateEmail('nobody'))
+  const badReset = await api.requestPasswordReset('nobody')
+  check('and requestPasswordReset says so', badReset.sent === false, badReset.message)
+
+  // The one call here that does go out. It mails nobody - there is no account on
+  // example.invalid - but it proves the request shape, the redirect and the client's
+  // reading of the answer, which is the part that would otherwise only ever run in front
+  // of a player who had forgotten their password.
+  storage.setItem(
+    KEY_AUTH_REQUEST,
+    JSON.stringify({ action: 'reset', email: 'nobody@example.invalid', at: 3 }),
+  )
+  await api.spendPendingRequest()
+  const resetStatus = JSON.parse(storage.getItem(KEY_AUTH_STATUS))
+  // Either outcome is correct. GoTrue answers a recovery for an address it has never seen
+  // exactly as it answers one it knows, so `reset_sent` is the ordinary result - but the
+  // project's own send-rate limit can refuse it, and that is a sentence a player can act on
+  // rather than a failure of this client.
+  check(
+    'a reset request comes back with something a player can act on',
+    resetStatus.state === AUTH_RESET_SENT || (resetStatus.state === 'error' && !!resetStatus.message),
+    resetStatus.state + (resetStatus.message ? ': ' + resetStatus.message : ''),
+  )
+  const leakedByReset = /relation|constraint|violates|PGRST|supabase\.co|apikey/i
+  check(
+    'and does not leak the project on the way back',
+    !leakedByReset.test(resetStatus.message || ''),
+    resetStatus.message,
+  )
+
+  const recoverUrl = lastCall('/auth/v1/recover') || ''
+  check(
+    'a reset link is addressed to the phone app',
+    recoverUrl.includes('redirect_to=' + encodeURIComponent('whaaack://auth')),
+    recoverUrl.split('?')[1],
+  )
+
+  // ------------------------------------------------ where a confirmation link lands
+  //
+  // Against a stubbed transport rather than the project, because the only way to make
+  // GoTrue send a confirmation mail is to create an account, and this needs asking a
+  // hundred times rather than once. The client takes its `fetch` as an argument precisely
+  // so this is possible - what is being checked is the URL it builds, and that is decided
+  // before anything leaves the machine.
+  //
+  // It is the one thing that would strand a watch-only player: a confirmation link has to
+  // land on the web page, which needs nothing installed, rather than on the Android deep
+  // link, which for them is a dead end on the last step of signing up. And GoTrue gives no
+  // sign when it is wrong - an unlisted `redirect_to` is silently replaced with `site_url`,
+  // the call succeeds, the mail goes out, and the only symptom is a player tapping a link
+  // that opens nothing.
+  {
+    const seen = []
+    const offline = createBackend({
+      url,
+      anonKey,
+      storage: memoryStorage(),
+      fetch: async ({ url: called }) => {
+        seen.push(called)
+        // A user with one identity: GoTrue's shape for "created, now go and confirm".
+        return { status: 200, statusText: 'OK', body: JSON.stringify({ id: 'x', identities: [{}] }) }
+      },
+    })
+    await offline.signUp('someone@example.invalid', 'orchard42', 'Someone')
+
+    const signupUrl = seen.find((u) => u.includes('/auth/v1/signup')) || ''
+    // Three different failures to tell apart, because the difference is the whole point:
+    // no signup at all, a signup with no redirect on it, and a signup pointed somewhere
+    // else. Collapsing them into one message costs an afternoon the next time this fails.
+    const where = !signupUrl
+      ? 'signup was never called'
+      : signupUrl.split('?')[1] || 'called with no redirect_to at all'
+    check(
+      'a confirmation link is addressed to the web page',
+      signupUrl.includes('redirect_to=' + encodeURIComponent('https://idct.tech/whaaack/auth')),
+      where,
+    )
+    check(
+      'and not to the app a watch cannot assume is there',
+      signupUrl.length > 0 && !signupUrl.includes(encodeURIComponent('whaaack://')),
+      where,
+    )
+  }
+
   // ------------------------------------------------------------- wrong password
   storage.setItem(
     KEY_AUTH_REQUEST,
@@ -157,6 +275,15 @@ async function main() {
     taken.message,
   )
   check('and did not sign anybody in', api.authSnapshot().signedIn === false)
+
+  // The same assertion against the real project, now that a signup has actually gone out
+  // over the wire rather than into a stub.
+  const liveSignup = lastCall('/auth/v1/signup') || ''
+  check(
+    'the live signup carried the web redirect too',
+    liveSignup.includes('redirect_to=' + encodeURIComponent('https://idct.tech/whaaack/auth')),
+    liveSignup.split('?')[1],
+  )
 
   storage.setItem(
     KEY_AUTH_REQUEST,
@@ -192,6 +319,33 @@ async function main() {
     'and does not name our schema on the way back',
     !leaked.test(tooManyHits.message || ''),
     tooManyHits.message,
+  )
+
+  // ------------------------------------------------------ changing the password
+  //
+  // The weak one never leaves the machine. The second is the *current* password, set
+  // again: it is the only way to prove an authenticated `PUT /auth/v1/user` really reaches
+  // GoTrue without leaving the account with a password this script chose. Either answer
+  // proves it - GoTrue either accepts the no-op or refuses it as `same_password` - and the
+  // account ends the run with the password it started with.
+  const weak = await api.changePassword('short')
+  check('a weak new password is refused before the network', weak.changed === false, weak.message)
+  check('and the player is still signed in', api.authSnapshot().signedIn === true)
+
+  const same = await api.changePassword(password)
+  check(
+    'setting the password reaches GoTrue',
+    same.changed === true || /already your password/.test(same.message || ''),
+    same.changed ? 'accepted' : same.message,
+  )
+  const leakedByChange = /relation|constraint|violates|PGRST|supabase\.co|apikey/i
+  check('and refuses in words rather than in error codes', !leakedByChange.test(same.message || ''), same.message)
+
+  const afterChange = JSON.parse(storage.getItem(KEY_AUTH_STATUS))
+  check(
+    'a password change never drops the player out of the account card',
+    afterChange.state === 'signed_in',
+    afterChange.state,
   )
 
   await api.signOut()

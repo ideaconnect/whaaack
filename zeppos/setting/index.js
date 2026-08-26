@@ -45,9 +45,11 @@ import {
   AUTH_WORKING,
   AUTH_SIGNED_IN,
   AUTH_CONFIRM,
+  AUTH_RESET_SENT,
   AUTH_ERROR,
 } from '../shared/protocol.js'
 import { NAME_HINT, PASSWORD_HINT } from '../shared/credentials.js'
+import { LOGO_IDCT, ICON_ANDROID, ICON_COFFEE } from './assets.js'
 
 const INK = '#2c2c34'
 const MUTED = '#6d6d7a'
@@ -55,6 +57,24 @@ const ACCENT = '#f2704f'
 const DANGER = '#c0392b'
 const OK = '#3f8f2f'
 const HAIRLINE = '#e4e4ea'
+
+/** Buy Me a Coffee's own yellow, and the near-black they set their cup in. */
+const COFFEE_YELLOW = '#ffdd00'
+const COFFEE_INK = '#111111'
+
+const COFFEE_URL = 'https://buymeacoffee.com/idct'
+const ANDROID_URL = 'https://play.google.com/store/apps/details?id=tech.idct.whaaack'
+const IDCT_URL = 'https://idct.tech'
+
+/**
+ * Centring has to be said on the text itself.
+ *
+ * `Text` writes `text-align: left` into its own style, so it wins over a `textAlign` on
+ * the block around it and the inherited value never arrives - the image above these lines
+ * centres from the parent, the lines do not.
+ */
+const CENTRED = { textAlign: 'center' }
+
 
 const CARD = {
   display: 'block',
@@ -78,9 +98,79 @@ let draftEmail = ''
 let draftPassword = ''
 let draftName = ''
 
+/**
+ * The new password, on the account card.
+ *
+ * Its own variable rather than sharing `draftPassword`, which belongs to the sign-in form.
+ * They are never on screen together - one is for a session that exists and the other for
+ * one that does not - but sharing would mean a half-typed sign-in password reappearing in
+ * the change-password field after a sign-in failed and succeeded, which is exactly the
+ * moment nobody is watching the field.
+ */
+let draftNewPassword = ''
+
 /** A `Text` that occupies its own line. */
 function line(content, style) {
   return Text({ style: Object.assign({ display: 'block' }, style) }, content)
+}
+
+/**
+ * Narrower than the cards above them, and centred in the page.
+ *
+ * These two are invitations rather than controls - one asks for a tip, the other points at
+ * a different game - and a full-width block reads as something the page needs you to do.
+ * Pulled in, they read as an offer, and the inset keeps them clear of the sign-in button
+ * that people actually came here for.
+ */
+const ROW_WIDTH = '80%'
+
+/**
+ * An icon and a label, centred together on one line, wrapped in a link out to the web.
+ *
+ * `inline-block` on a shared baseline rather than flexbox: this page is rendered by
+ * whatever webview the Zepp app is built around, on both phone platforms and across
+ * several app versions, and inline layout is the part of CSS that has behaved the same way
+ * in every renderer since 1997. It also centres the pair for free - two inline boxes on a
+ * line that `text-align: center` acts on - where flex would need the row to agree about
+ * `justify-content`.
+ *
+ * The label is capped rather than fixed. At a fixed width it would fill the row and its
+ * own centring would be all that showed; a maximum lets a short label shrink to its text
+ * so the icon sits beside it, and a long one still wrap instead of pushing the icon out.
+ */
+function linkRow({ href, icon, iconSize, label, labelStyle, style }) {
+  return Link({ source: href }, [
+    View(
+      {
+        style: Object.assign(
+          { display: 'block', width: ROW_WIDTH, margin: '0 auto', textAlign: 'center' },
+          style,
+        ),
+      },
+      [
+        Image({
+          src: icon,
+          style: {
+            display: 'inline-block',
+            verticalAlign: 'middle',
+            width: iconSize,
+            height: iconSize,
+            marginRight: '12px',
+          },
+        }),
+        Text(
+          {
+            style: Object.assign(
+              { display: 'inline-block', verticalAlign: 'middle', maxWidth: '68%' },
+              CENTRED,
+              labelStyle,
+            ),
+          },
+          label,
+        ),
+      ],
+    ),
+  ])
 }
 
 AppSettingsPage({
@@ -156,10 +246,58 @@ AppSettingsPage({
 
   requestSignOut() {
     draftPassword = ''
+    draftNewPassword = ''
     this.storage().setItem(
       KEY_AUTH_REQUEST,
       JSON.stringify({ action: 'signout', at: Date.now() }),
     )
+  },
+
+  /**
+   * Asks for a reset link to whatever address is in the sign-in form.
+   *
+   * The form's own field rather than a second one of its own: somebody who has come here
+   * to reset a password has almost always just typed the address and failed to sign in
+   * with it, and a second box to type it into again would be asking them to prove they can
+   * still spell it.
+   */
+  requestReset() {
+    const email = draftEmail.trim()
+    if (!email) {
+      this.setStatus({ state: AUTH_ERROR, email, message: gettext('emailNeeded') })
+      return
+    }
+    // The password in the form has nothing to do with this request and is about to be
+    // irrelevant anyway.
+    draftPassword = ''
+    this.storage().setItem(
+      KEY_AUTH_REQUEST,
+      JSON.stringify({ action: 'reset', email, at: Date.now() }),
+    )
+    this.setStatus({ state: AUTH_WORKING, email })
+  },
+
+  /** Sets a new password on the session that is already signed in. */
+  requestPasswordChange() {
+    const status = this.status()
+    const password = draftNewPassword
+    if (!password) {
+      this.setStatus(
+        Object.assign({}, status, { notice: null, problem: gettext('newPasswordNeeded') }),
+      )
+      return
+    }
+
+    // Out of the draft before it is out of this function, exactly as `submit` does with the
+    // sign-in one: the field is legible while it is on screen, so it comes off it the
+    // moment the button is pressed rather than sitting there until the phone locks.
+    draftNewPassword = ''
+
+    this.storage().setItem(
+      KEY_AUTH_REQUEST,
+      JSON.stringify({ action: 'password', password, at: Date.now() }),
+    )
+    this.setStatus(Object.assign({}, status, { notice: null, problem: null, busy: true }))
   },
 
   heading(status) {
@@ -168,6 +306,7 @@ AppSettingsPage({
     let subtitle = gettext('subtitle')
     if (status.state === AUTH_SIGNED_IN) subtitle = gettext('subtitleSignedIn')
     else if (status.state === AUTH_CONFIRM) subtitle = gettext('subtitleConfirm')
+    else if (status.state === AUTH_RESET_SENT) subtitle = gettext('subtitleReset')
     else if (this.mode() === MODE_SIGN_UP) subtitle = gettext('subtitleSignUp')
 
     return View({ style: { display: 'block', padding: '4px 4px 14px' } }, [
@@ -218,6 +357,95 @@ AppSettingsPage({
           width: '100%',
         },
         onClick: () => this.requestSignOut(),
+      }),
+    ])
+  },
+
+  /**
+   * Changing the password, on the account card's own terms.
+   *
+   * A card of its own under the account rather than another control inside it, because it
+   * is the one thing on this page that is not about *this* app: it changes the password of
+   * an account the phone game shares, and a separator says that better than a paragraph
+   * would.
+   *
+   * One field. The server does not ask for the current password
+   * (`secure_password_change = false`, and supabase/config.toml explains why), so asking
+   * for one here would be theatre - and on a page with no masked input, theatre performed
+   * in the clear. There is no confirm-it-twice field either: that guards against a typo
+   * you cannot see, and this one is legible the whole time it is being typed.
+   */
+  passwordCard(status) {
+    const busy = !!status.busy
+    const rows = [
+      line(gettext('changePassword'), {
+        fontSize: '15px',
+        fontWeight: 'bold',
+        color: INK,
+        marginBottom: '10px',
+      }),
+      this.field(
+        gettext('newPassword'),
+        draftNewPassword,
+        (value) => {
+          draftNewPassword = String(value || '')
+        },
+        undefined,
+        72,
+      ),
+      line(PASSWORD_HINT, { fontSize: '12px', color: MUTED, margin: '-4px 0 10px' }),
+      Button({
+        label: busy ? gettext('working') : gettext('changePassword'),
+        style: {
+          fontSize: '15px',
+          borderRadius: '22px',
+          background: busy ? '#c9c9d0' : ACCENT,
+          color: '#ffffff',
+          width: '100%',
+        },
+        onClick: () => this.requestPasswordChange(),
+      }),
+    ]
+
+    if (status.problem) {
+      rows.push(line(status.problem, { fontSize: '13px', color: DANGER, marginTop: '12px' }))
+    } else if (status.notice) {
+      rows.push(line(status.notice, { fontSize: '13px', color: OK, marginTop: '12px' }))
+    }
+
+    return View({ style: CARD }, rows)
+  },
+
+  /**
+   * What a reset request gets in return.
+   *
+   * The wording is conditional on purpose. GoTrue answers a recovery request for an
+   * address it has never seen exactly as it answers one for an address it knows, which is
+   * what stops this form being a way to ask whether somebody has an account - so this card
+   * must not claim a mail was sent, only that one is on its way if there was anywhere to
+   * send it.
+   */
+  resetSentCard(status) {
+    return View({ style: CARD }, [
+      line(gettext('resetSentTitle'), {
+        fontSize: '17px',
+        fontWeight: 'bold',
+        color: OK,
+        marginBottom: '6px',
+      }),
+      line(status.email || '', { fontSize: '14px', color: INK, marginBottom: '8px' }),
+      line(gettext('resetSentBody'), { fontSize: '13px', color: MUTED, marginBottom: '6px' }),
+      line(gettext('resetSentWhere'), { fontSize: '12px', color: MUTED, marginBottom: '14px' }),
+      Button({
+        label: gettext('backToSignIn'),
+        style: {
+          fontSize: '15px',
+          borderRadius: '22px',
+          background: ACCENT,
+          color: '#ffffff',
+          width: '100%',
+        },
+        onClick: () => this.setMode(MODE_SIGN_IN),
       }),
     ])
   },
@@ -341,6 +569,29 @@ AppSettingsPage({
       )
     }
 
+    // Only under the sign-in half. On the signup form there is no password to have
+    // forgotten yet, and the offer would read as an instruction.
+    if (!signingUp) {
+      rows.push(
+        line(gettext('forgotPassword'), {
+          fontSize: '12px',
+          color: MUTED,
+          margin: '16px 0 8px',
+        }),
+        Button({
+          label: gettext('sendReset'),
+          style: {
+            fontSize: '14px',
+            borderRadius: '22px',
+            background: '#ececef',
+            color: INK,
+            width: '100%',
+          },
+          onClick: () => this.requestReset(),
+        }),
+      )
+    }
+
     return View({ style: CARD }, rows)
   },
 
@@ -374,6 +625,66 @@ AppSettingsPage({
     ])
   },
 
+  /**
+   * What sits under every version of this page: somewhere to say thank you, a pointer to
+   * the bigger game, and who made it.
+   *
+   * Under *every* version deliberately. This is the only screen the Zepp edition has that
+   * is big enough to read, and the three states above it - signed out, awaiting a
+   * confirmation mail, signed in - are all states a player can sit in for days. A footer
+   * that only appeared on one of them would be a footer most people never saw.
+   */
+  footer() {
+    return View({ style: { display: 'block', padding: '2px 4px 8px' } }, [
+      linkRow({
+        href: COFFEE_URL,
+        icon: ICON_COFFEE,
+        iconSize: '30px',
+        label: gettext('buyMeACoffee'),
+        labelStyle: { fontSize: '15px', fontWeight: 'bold', color: COFFEE_INK },
+        style: {
+          background: COFFEE_YELLOW,
+          borderRadius: '12px',
+          padding: '12px 16px',
+          marginBottom: '12px',
+        },
+      }),
+
+      linkRow({
+        href: ANDROID_URL,
+        icon: ICON_ANDROID,
+        iconSize: '44px',
+        label: gettext('androidVersion'),
+        labelStyle: { fontSize: '14px', fontWeight: 'bold', color: INK },
+        style: {
+          background: '#ffffff',
+          border: '1px solid ' + HAIRLINE,
+          borderRadius: '12px',
+          padding: '12px 16px',
+          marginBottom: '20px',
+        },
+      }),
+
+      View({ style: { display: 'block', textAlign: 'center', paddingBottom: '6px' } }, [
+        Link({ source: IDCT_URL }, [
+          Image({
+            src: LOGO_IDCT,
+            alt: 'IDCT',
+            style: { display: 'inline-block', width: '92px', height: '86px' },
+          }),
+        ]),
+        line(
+          gettext('copyright'),
+          Object.assign({ fontSize: '11px', color: MUTED, marginTop: '6px' }, CENTRED),
+        ),
+        line(
+          gettext('rights'),
+          Object.assign({ fontSize: '11px', color: MUTED, marginTop: '2px' }, CENTRED),
+        ),
+      ]),
+    ])
+  },
+
   build(props) {
     this.state.props = props
     const status = this.status()
@@ -384,6 +695,8 @@ AppSettingsPage({
       return View({ style: { padding: '14px 16px' } }, [
         this.heading(status),
         this.signedInCard(status),
+        this.passwordCard(status),
+        this.footer(),
       ])
     }
 
@@ -391,6 +704,15 @@ AppSettingsPage({
       return View({ style: { padding: '14px 16px' } }, [
         this.heading(status),
         this.confirmCard(status),
+        this.footer(),
+      ])
+    }
+
+    if (status.state === AUTH_RESET_SENT) {
+      return View({ style: { padding: '14px 16px' } }, [
+        this.heading(status),
+        this.resetSentCard(status),
+        this.footer(),
       ])
     }
 
@@ -398,6 +720,7 @@ AppSettingsPage({
       this.heading(status),
       this.formCard(status),
       this.modeSwitch(),
+      this.footer(),
     ])
   },
 })

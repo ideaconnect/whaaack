@@ -41,10 +41,17 @@ import {
   AUTH_WORKING,
   AUTH_SIGNED_IN,
   AUTH_CONFIRM,
+  AUTH_RESET_SENT,
   AUTH_ERROR,
   SCOPE_ALL_TIME,
 } from './protocol.js'
-import { normalizeName, validateEmail, validateName, validatePassword } from './credentials.js'
+import {
+  normalizeName,
+  validateEmail,
+  validateName,
+  validatePassword,
+  PASSWORD_HINT,
+} from './credentials.js'
 
 /** Refresh this far ahead of expiry, so a call never starts on a token about to die. */
 const EXPIRY_SKEW_MS = 60000
@@ -53,6 +60,41 @@ const BOARD_LIMIT = 20
 
 /** Mirrors zepp_scores_millis_plausible. */
 const MAX_MILLIS = 600000
+
+/**
+ * Where a confirmation link lands.
+ *
+ * Not `site_url`, which is `whaaack://auth` - a deep link only the Android app can answer.
+ * That is the right destination for the phone game, where the app is by definition
+ * installed, and the wrong one here: an account can be created start to finish from this
+ * settings page by somebody who has never installed the Android version and has no reason
+ * to, and handing them a link their phone cannot open is a dead end at the exact moment
+ * they are trying to finish signing up.
+ *
+ * So the watch's signup asks for the web page instead, which says the address is confirmed
+ * and needs nothing installed. Which flow a link belongs to is decided per request by this
+ * parameter, so the phone game is untouched and no project setting changes.
+ *
+ * The exact spelling matters. GoTrue matches `redirect_to` against
+ * `additional_redirect_urls` and *silently substitutes `site_url`* when it does not match -
+ * no error, no clue, just a link that goes back to being an Android deep link. This string
+ * is already on that list in `supabase/config.toml`; a trailing slash would not be.
+ */
+const CONFIRM_REDIRECT = 'https://idct.tech/whaaack/auth'
+
+/**
+ * Where a reset link lands: the phone game's deep link, the same one
+ * `AuthRepository.sendPasswordReset` asks for, and the other address whitelisted in
+ * `supabase/config.toml`.
+ *
+ * Still the deep link, unlike the confirmation above, because the two are not the same
+ * problem. Confirming an address is over when the page loads; setting a new password needs
+ * somewhere to type one, and the only thing in this project that offers that is the
+ * Android app. A watch-only player can therefore ask for a reset and have nowhere to spend
+ * it - a real gap, and one that closes with a form on the web page rather than with a
+ * different constant here.
+ */
+const RESET_REDIRECT = 'whaaack://auth'
 
 /**
  * @param url            the project's base URL
@@ -241,7 +283,7 @@ export function createBackend({ url, anonKey, fetch, storage }) {
 
     setStatus({ state: AUTH_WORKING, email })
 
-    const result = await call('/auth/v1/signup', {
+    const result = await call('/auth/v1/signup?redirect_to=' + encodeURIComponent(CONFIRM_REDIRECT), {
       method: 'POST',
       body: {
         email: String(email).trim(),
@@ -279,6 +321,123 @@ export function createBackend({ url, anonKey, fetch, storage }) {
 
     setStatus({ state: AUTH_CONFIRM, email, name: normalizeName(displayName) })
     return { created: true, signedIn: false }
+  }
+
+  /**
+   * Sets a new password on the session that is already signed in.
+   *
+   * No current-password field, and none is asked for. The project runs with
+   * `secure_password_change = false` (see supabase/config.toml, which explains why at
+   * length), so GoTrue accepts a bare `PUT /auth/v1/user` on any live session - and the
+   * phone game's own `AuthRepository.updatePassword` does exactly this. Asking here for a
+   * password the server will not check would be theatre, and on a page with no masked
+   * input it would be theatre performed in the clear.
+   *
+   * There is no confirm-it-twice field either, for that same reason: the Settings API has
+   * no masked input, so the new password is legible while it is typed. A second field
+   * guards against a typo you cannot see, and this one you can.
+   *
+   * The status stays `signed_in` throughout. Reporting progress as `working` or a refusal
+   * as `error` would swap the account card for a sign-in form over a session that never
+   * stopped being valid, and the player would think they had been signed out by trying to
+   * change their password.
+   */
+  async function changePassword(newPassword) {
+    const session = loadSession()
+    if (!session) {
+      setStatus({ state: AUTH_SIGNED_OUT })
+      return { changed: false, reason: 'signed_out' }
+    }
+
+    const named = { name: session.name || '', email: session.email || '' }
+
+    const complaint = validatePassword(newPassword)
+    if (complaint) {
+      setStatus(Object.assign({ state: AUTH_SIGNED_IN }, named, { problem: complaint }))
+      return { changed: false, message: complaint }
+    }
+
+    setStatus(Object.assign({ state: AUTH_SIGNED_IN }, named, { busy: true }))
+
+    const result = await authorized('/auth/v1/user', {
+      method: 'PUT',
+      body: { password: newPassword },
+    })
+
+    if (result.unauthenticated) {
+      // `authorized` only reports this once the refresh token is gone too, and it has
+      // already cleared the session by then.
+      setStatus({ state: AUTH_SIGNED_OUT, message: 'Signed out - please sign in again.' })
+      return { changed: false, reason: 'signed_out' }
+    }
+
+    if (result.status < 200 || result.status >= 300) {
+      const code = result.body && (result.body.error_code || result.body.error)
+      const message =
+        code === 'same_password'
+          ? 'That is already your password. Choose a different one.'
+          : code === 'weak_password'
+            ? PASSWORD_HINT
+            : errorMessage(result, 'Could not change the password just now.')
+      setStatus(Object.assign({ state: AUTH_SIGNED_IN }, named, { problem: message }))
+      return { changed: false, message }
+    }
+
+    // Nothing to store. The response carries a user rather than tokens, and with
+    // `secure_password_change` off the session that made the change stays valid - so the
+    // player is still signed in on both the phone and the watch, which is what they meant.
+    setStatus(
+      Object.assign({ state: AUTH_SIGNED_IN }, named, { notice: 'Password changed.' }),
+    )
+    return { changed: true }
+  }
+
+  /**
+   * Asks GoTrue to mail a reset link.
+   *
+   * Deliberately says the same thing whatever comes back, because GoTrue does: a recovery
+   * request for an address it has never seen is answered exactly like one for an address
+   * it knows, and that is the point - anything else here would turn this form into a way
+   * of asking whether somebody has an account. So the success wording is conditional
+   * ("if that address has an account") rather than a claim about what was sent.
+   *
+   * `redirect_to` is the phone game's own deep link, matching
+   * `AuthRepository.sendPasswordReset`. It is the only destination this project has: the
+   * link has to land somewhere that can take a new password, and the only thing that can
+   * is the Android app. A watch-only player who never installed it can ask for the mail
+   * and then has nowhere to spend it - a real gap, and one that needs a web page rather
+   * than another line of client code.
+   */
+  async function requestPasswordReset(email) {
+    const address = String(email || '').trim()
+    const complaint = validateEmail(address)
+    if (complaint) {
+      setStatus({ state: AUTH_ERROR, email: address, message: complaint })
+      return { sent: false, message: complaint }
+    }
+
+    setStatus({ state: AUTH_WORKING, email: address })
+
+    const result = await call('/auth/v1/recover?redirect_to=' + encodeURIComponent(RESET_REDIRECT), {
+      method: 'POST',
+      body: { email: address },
+    })
+
+    if (result.status < 200 || result.status >= 300) {
+      const code = result.body && (result.body.error_code || result.body.error)
+      // `max_frequency = "60s"`, and the project-wide hourly budget on top of it. Both come
+      // back as a rate limit, and both mean "wait", which is advice a player can act on -
+      // unlike GoTrue's own wording, which counts down in seconds it does not always give.
+      const message =
+        code === 'over_email_send_rate_limit'
+          ? 'A link was requested very recently. Give it a minute and try again.'
+          : errorMessage(result, 'Could not send the reset link just now.')
+      setStatus({ state: AUTH_ERROR, email: address, message })
+      return { sent: false, message }
+    }
+
+    setStatus({ state: AUTH_RESET_SENT, email: address })
+    return { sent: true }
   }
 
   async function signOut() {
@@ -496,6 +655,32 @@ export function createBackend({ url, anonKey, fetch, storage }) {
         setStatus({ state: AUTH_SIGNED_OUT })
       })
     }
+
+    if (request.action === 'reset') {
+      const address = String(request.email || '').trim()
+      return requestPasswordReset(address).catch((error) => {
+        setStatus({
+          state: AUTH_ERROR,
+          email: address,
+          message: describe(error, 'Could not reach the sign-in service.'),
+        })
+      })
+    }
+
+    if (request.action === 'password') {
+      return changePassword(String(request.password || '')).catch((error) => {
+        const session = loadSession()
+        // Reported inside the account card rather than as an `error` state, which would
+        // take the player out of it. See `changePassword`.
+        setStatus({
+          state: session ? AUTH_SIGNED_IN : AUTH_SIGNED_OUT,
+          name: session ? session.name || '' : undefined,
+          email: session ? session.email || '' : undefined,
+          problem: describe(error, 'Could not reach the sign-in service.'),
+        })
+      })
+    }
+
     if (request.action !== 'signin' && request.action !== 'signup') {
       return Promise.resolve(null)
     }
@@ -529,6 +714,8 @@ export function createBackend({ url, anonKey, fetch, storage }) {
     signIn,
     signUp,
     signOut,
+    changePassword,
+    requestPasswordReset,
     refresh,
     authSnapshot,
     board,

@@ -71,7 +71,49 @@ msgid "confirmTitle"
 msgstr "Check your inbox"
 
 msgid "confirmBody"
-msgstr "We sent a link to confirm the address. Open it, then come back here and sign in with the password you just chose."
+msgstr "We sent a link to confirm the address. Open it on this phone — it opens a page in your browser, no app needed. Then come back here and sign in with the password you just chose."
 
 msgid "backToSignIn"
 msgstr "Sign in"
+
+msgid "buyMeACoffee"
+msgstr "Buy me a coffee"
+
+msgid "androidVersion"
+msgstr "Check full version for Android devices!"
+
+msgid "copyright"
+msgstr "© 2026 IDCT TECH · idct.tech"
+
+msgid "rights"
+msgstr "Whaaack! for Zepp OS. All rights reserved."
+
+msgid "subtitleReset"
+msgstr "A reset link is on its way, if that address has an account."
+
+msgid "changePassword"
+msgstr "Change password"
+
+msgid "newPassword"
+msgstr "New password"
+
+msgid "newPasswordNeeded"
+msgstr "Type the new password first."
+
+msgid "emailNeeded"
+msgstr "Enter the email address of the account first."
+
+msgid "forgotPassword"
+msgstr "Forgotten it? We can email a link to set a new one."
+
+msgid "sendReset"
+msgstr "Email me a reset link"
+
+msgid "resetSentTitle"
+msgstr "Check your inbox"
+
+msgid "resetSentBody"
+msgstr "If that address has an account, a link to set a new password is on its way to it. The link is good for 30 minutes."
+
+msgid "resetSentWhere"
+msgstr "Open it on this phone — it hands you over to the Whaaack! Android app to choose the new password. Then come back here and sign in."
