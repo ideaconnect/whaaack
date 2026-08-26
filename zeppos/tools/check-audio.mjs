@@ -77,11 +77,14 @@ async function scenario(label, stateAfterComplete) {
   audio.setSoundOn(true)
 
   audio.primeSplat()
-  audio.startMusic()
   await wait(60)
 
   check('the splat takes the one player the device has', media.calls.includes('create:ok'), trace())
-  check('and the music is refused rather than crashing', media.calls.includes('create:refused'))
+  check(
+    'and asks for exactly one - nothing else competes for it now',
+    media.calls.filter((c) => c.startsWith('create:')).length === 1,
+    trace(),
+  )
   check('the splat is armed before the first hit', started() === 0 && loaded() === 1, trace())
 
   // A hit, then another while the first is still sounding. The wait is not padding: the
@@ -116,6 +119,32 @@ async function scenario(label, stateAfterComplete) {
   }
   const sounded = started() + sought()
   check('ten hits in a row all sound', sounded === hits, sounded + '/' + hits + '  ' + trace())
+  check('and none of them stops the player', stopped() === 0, trace())
+
+  // The promise, at the speed the top of the curve actually reaches: hits arriving faster
+  // than the 325ms sample can play. Every one has to be heard, which on a single voice
+  // means every one after the first cuts its predecessor short.
+  await wait(500)
+  media.calls.length = 0
+  const fast = 8
+  for (let i = 0; i < fast; i++) {
+    audio.playSplat(Date.now())
+    await wait(70)
+  }
+  const heard = started() + sought()
+  check('eight hits inside one sample all sound', heard === fast, heard + '/' + fast + '  ' + trace())
+  check('by seeking rather than taking the player apart', sought() >= fast - 1 && stopped() === 0, trace())
+
+  // A hit the player refuses is the one case where a whack could make no noise at all.
+  // It is chased instead: the file goes back in and the hit sounds when it lands, as long
+  // as the fruit it belongs to is still recent.
+  await wait(500)
+  media.calls.length = 0
+  media.config.refuseNextStart = true
+  audio.playSplat(Date.now())
+  check('a refused hit puts the file back', started() === 0 && loaded() === 1, trace())
+  await wait(80)
+  check('and is chased rather than lost', started() === 1, trace())
 
   // Silence, and coming back from it.
   media.calls.length = 0

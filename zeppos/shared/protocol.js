@@ -108,7 +108,7 @@ export const LOCAL_BEST = 'best'
  *
  * On the watch rather than in the phone's settings page, where the account lives, because
  * this is the one preference a player may want to change without their phone in reach -
- * the point of turning the music off is usually that somebody has just walked in. A
+ * the point of turning the sound off is usually that somebody has just walked in. A
  * setting that needed the Zepp app to change would be no use at that moment.
  */
 export const LOCAL_SOUND = 'sound'

@@ -22,7 +22,7 @@ import {
 } from '../../shared/engine.js'
 import { REQ_SUBMIT, LOCAL_BEST } from '../../shared/protocol.js'
 import { seconds, secondsLabel } from '../../shared/format.js'
-import { startMusic, primeSplat, playSplat, release as releaseAudio } from '../../shared/audio.js'
+import { primeSplat, playSplat, release as releaseAudio } from '../../shared/audio.js'
 import {
   CREAM,
   CREAM_DIM,
@@ -219,17 +219,11 @@ Page(
       // not watch.
       pauseDropWristScreenOff({ duration: 0 })
 
-      // Both are asynchronous and neither is worth waiting for: the splat is loaded now
-      // so that the first hit of the first run plays as promptly as the last, and the
-      // music starts whenever it is ready. Started here rather than in `startRun` because
-      // the music is meant to carry across the result screen and into the next run - a
-      // track that stopped and restarted every time somebody pressed Play again would be
-      // a stutter, not a soundtrack.
-      //
-      // The splat goes first because a watch may only hand out one player, and if it
-      // does, the sound worth spending it on is the one that answers a tap.
+      // Asynchronous, and not worth waiting for: the file is loaded now so that the first
+      // hit of the first run sounds as promptly as the hundredth. Here rather than in
+      // `startRun` because the player is claimed for the whole visit - reclaiming it on
+      // every Play again would cost the first hit of every run after the first.
       primeSplat()
-      startMusic()
 
       // A run in progress swallows Back and ends the run instead; a second Back then
       // leaves, because by that point there is nothing to protect. The same rule for the
@@ -253,8 +247,8 @@ Page(
       offKey()
       resetPageBrightTime()
       resetDropWristScreenOff()
-      // The one call that has to happen. A player left holding the audio route keeps the
-      // music going into whatever the watch shows next, and keeps the speaker powered.
+      // The one call that has to happen. A page that leaves without it keeps the audio
+      // route open and the speaker powered, and holds the device's only media player.
       releaseAudio()
     },
 

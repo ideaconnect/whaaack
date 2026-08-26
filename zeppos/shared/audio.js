@@ -1,40 +1,47 @@
 /**
- * The two sounds a run makes, and the switch that silences them.
+ * The one sound a run makes, and the switch that silences it.
  *
- * `@zos/media` is a *media player*, not a sound bank, and the engine hands out exactly one
- * of them per app - `create` answers `undefined` for the second, logging
- * `js player instance already created, can't create new one` on the device side. So there
- * is one voice, the splat claims it, and the music is atmosphere the watch does not get:
- * of the two, the sound worth having is the one that answers a tap, because a hit that
- * makes no sound is a hit that feels like it missed. `startMusic` is left in and left
- * failing gracefully, so a future device with a second player gets its music for free.
+ * There used to be music as well, and it never once played. `@zos/media` hands out exactly
+ * one player per app - the second `create` returns `undefined`, logging
+ * `js player instance already created, can't create new one` on the device side - and the
+ * splat rightly claimed it, so the music lost that race on every device, on every run. A
+ * 206KB file, a loop crossfaded closed on a musical phrase and a restart-on-COMPLETE
+ * handler, all of it dead weight in the package and dead code here. It is gone. This module
+ * is one player playing one sample.
  *
- * `release()` does give the slot back, but not on the same tick: releasing and immediately
- * re-creating still fails, while releasing on the way out of the game page and creating
- * again on the way back in works every time. That is why leaving the page still releases.
- *
- * Everything else here is shaped by three things the device does that the documentation
- * does not mention, all three established by probing a running watch:
+ * That sample has to be *reliable*, which on a single voice means one thing: a whack
+ * landing while the last splat is still sounding cuts it short and starts again. It does
+ * not queue behind it, and it is not dropped. Everything below serves that, and is shaped
+ * by three things the device does that the documentation does not mention, all three
+ * established by probing a running watch:
  *
  *   1. `start()`, `seek()` and `stop()` REPORT FAILURE BY RETURNING FALSE, not by throwing.
  *      A guard that only catches exceptions sees a silent success. This was the bug behind
  *      splats that lagged and would not overlap: nothing knew they had not played.
  *
  *   2. `stop()` does not pause a loaded file, it UNLOADS it - the status drops from
- *      PREPARING/PREPARED back to INITIALIZED, and `start()` from there answers false. So
- *      "stop it and start it again" is precisely the thing that cannot be done to retrigger
- *      a sample; it takes the player apart.
+ *      PREPARED back to INITIALIZED, and `start()` from there answers false. So "stop it
+ *      and start it again" is precisely the thing that cannot be done to retrigger a
+ *      sample; it takes the player apart. Nothing on the whack path stops the player.
  *
  *   3. `seek(percentage)` is the retrigger. It leaves the player started and moves the
  *      playhead, which is what "cut the sound short and play it again" actually means here.
  *
- * The status codes are not hard-coded, because only the first three were ever observed
- * (IDLE 0, INITIALIZED 1, PREPARING 2) and guessing the rest off the documentation's
- * ordering would be a guess in the one place that decides whether a sound plays. Instead
- * the player is asked what it reports at the one moment it is certainly loaded - inside its
- * own PREPARE handler - and that one number is remembered. Whether a sound is still
- * sounding is not read from the player at all; it is kept by the clock, because a status
- * read straight after `start()` can report a transitional state that never recurs.
+ * The status codes are not hard-coded. Only three were ever observed (IDLE 0,
+ * INITIALIZED 1, PREPARING 2) and guessing the rest off the documentation's ordering would
+ * be a guess in the one place that decides whether a sound plays, so the player is asked
+ * what it reports at the one moment it is certainly loaded - inside its own PREPARE
+ * handler - and that number is remembered. Whether the sample is still sounding is not read
+ * from the player at all; it is kept by the clock, because a status read straight after
+ * `start()` can report a transitional state that never recurs.
+ *
+ * `release()` does give the one instance back, but not on the same tick: releasing and
+ * re-creating immediately still fails, while releasing on the way out of the game page and
+ * creating again on the way back in works every time.
+ *
+ * tools/check-audio.mjs runs all of this against a fake device built from that probe,
+ * because the simulator cannot: it has no audio device, so `prepare()` never leaves
+ * PREPARING and every path past "the file is loaded" is unreachable there.
  */
 
 import { create, id } from '@zos/media'
@@ -42,31 +49,36 @@ import { localStorage } from '@zos/storage'
 
 import { LOCAL_SOUND, LOCAL_SOUND_OK } from './protocol.js'
 
-const MUSIC_FILE = 'music.mp3'
 const SPLAT_FILE = 'splat.mp3'
-
-/**
- * Where the two sit against each other.
- *
- * The music is well under the splat on purpose: it is the only continuous sound in a game
- * whose whole feedback loop is a short one, and a hit has to cut through it on a speaker
- * the size of a grain of rice. Both files are baked at full scale
- * (tools/generate_zepp_audio.py peak-normalises the splat), so this is the only place the
- * balance between them is decided.
- */
-const MUSIC_VOLUME = 55
 const SPLAT_VOLUME = 100
 
 /**
- * Two hits closer together than this share one sound.
+ * A floor under how often the sample may restart, not a policy about merging hits.
  *
- * Retriggering is a seek to the top, so a hit landing 30ms after the last one would cut
- * the sample to a click and the run would sound like a Geiger counter. Ninety milliseconds
- * is under the fastest tapping anyone sustains, so in practice this only fires on the
- * double-taps that land almost together - where one wetter-sounding splat is a better
- * answer than two clipped ones.
+ * Two taps on two different tiles cannot land 50ms apart on a wrist, so in an actual run
+ * this never fires; it is here so that a repeated call within one frame, or a double-fire
+ * out of the touch layer, cannot chop the sample into a click. It used to be 90ms and it
+ * used to be a policy - "two hits closer than this share one sound" - which was the right
+ * trade only while retriggering was broken. A whack that lands is a whack to be heard.
  */
-const SPLAT_MIN_GAP_MS = 90
+const SPLAT_MIN_GAP_MS = 50
+
+/**
+ * How long a whack is still worth making a noise about.
+ *
+ * Only reached when the player refuses a start and the file has to go back in - which the
+ * COMPLETE handler exists to prevent, and which should therefore be rare. When it does
+ * happen the hit is chased rather than dropped, but not indefinitely: a splat arriving a
+ * third of a second after the fruit it belongs to reads as a fault in the game rather than
+ * as feedback, so past this it is let go.
+ */
+const CHASE_MS = 140
+
+/** Assumed still sounding for this long past the end, since COMPLETE may lag the audio. */
+const PLAYING_SLACK_MS = 40
+
+/** Used until `getDuration()` answers; the splat is a 325ms sample. */
+const ASSUMED_DURATION_MS = 350
 
 /**
  * How long to wait for a PREPARE event before playing anyway.
@@ -85,31 +97,16 @@ const PREPARE_GRACE_MS = 1500
 /** True once `create` has thrown, which it does on a watch with nothing to play through. */
 let noAudio = false
 
-let music = null
 let splat = null
-
-let musicWanted = false
 let lastSplatMs = 0
 
 /**
  * What this player reports when it is loaded.
  *
- * Learned rather than declared - see the header - and read at the one instant it is
- * certain, inside the PREPARE handler. `null` until then, and every reader treats `null`
- * as "no opinion" rather than guessing.
- *
- * There is deliberately no matching reading for "playing". `getStatus()` immediately after
- * a `start()` can just as easily report STARTING as STARTED, and a number captured in a
- * transitional state would never match again - so whether a sound is still sounding is
- * kept here instead, from when it was started and how long it runs for.
+ * Learned rather than declared, and read at the one instant it is certain: inside the
+ * PREPARE handler. `null` until then, and every reader treats `null` as "no opinion".
  */
 let readyStatus = null
-
-/** Assumed still sounding for this long past the end, since COMPLETE may lag the audio. */
-const PLAYING_SLACK_MS = 40
-
-/** Used until `getDuration()` answers; the splat is a 325ms sample. */
-const ASSUMED_DURATION_MS = 350
 
 export function soundOn() {
   return Number(localStorage.getItem(LOCAL_SOUND, 1)) !== 0
@@ -117,13 +114,13 @@ export function soundOn() {
 
 export function setSoundOn(value) {
   localStorage.setItem(LOCAL_SOUND, value ? 1 : 0)
-  if (value) {
-    // Switching sound off stops the player, and stopping unloads it (see the header), so
-    // switching it back on has to put the file back before anything will play.
-    if (splat && !splat.ready) load(splat)
-  } else {
+  if (!value) {
     hush()
+    return
   }
+  // Switching sound off stops the player, and stopping unloads it, so switching it back on
+  // has to put the file back before anything will play.
+  if (splat && !splat.ready) load(splat)
 }
 
 /**
@@ -131,9 +128,7 @@ export function setSoundOn(value) {
  *
  * Recorded because the answer is only knowable on the game page, seconds after it opens,
  * and the question gets asked on the home screen - where the toggle otherwise promises
- * sound that a player has already found out they are not going to get. `0` is written only
- * when the platform refuses outright; a watch that simply has no spare player for the
- * music still counts as working, because the splats do.
+ * sound that a player has already found out they are not going to get.
  */
 export function soundKnownBroken() {
   return localStorage.getItem(LOCAL_SOUND_OK, '') === '0'
@@ -150,8 +145,7 @@ function noteAudio(ok) {
  * callback an object and tests `result.isReady`; the current docs' own example tests the
  * argument itself for truth and calls `start()` on that. A guard written for only the
  * first reads a bare `true` as a failure and never starts anything - which is total
- * silence, on every sound, with nothing in the log but a line claiming the file would not
- * prepare.
+ * silence, with nothing in the log but a line claiming the file would not prepare.
  *
  * So anything truthy counts, unless it is an object that explicitly says otherwise.
  */
@@ -169,11 +163,11 @@ function prepared(result) {
  * some firmware returns nothing at all from calls that worked, so `undefined` has to count
  * as success or every working sound would be treated as broken.
  */
-function attempt(sound, label, fn) {
+function attempt(label, fn) {
   try {
     return fn() !== false
   } catch (error) {
-    console.log('zepp audio: ' + sound.file + ' ' + label + ' threw - ' + error)
+    console.log('zepp audio: ' + label + ' threw - ' + error)
     return false
   }
 }
@@ -186,9 +180,15 @@ function statusOf(sound) {
   }
 }
 
-/** Claims the one player the device has, if it is going spare. */
-function claim(file, volume) {
-  if (noAudio) return null
+/**
+ * Loads the splat without playing it.
+ *
+ * Called on the countdown so that the first hit of a run is as loud and as prompt as the
+ * hundredth. Preparing on the first hit instead would silence it and land its sound on
+ * whatever happened next.
+ */
+export function primeSplat() {
+  if (!soundOn() || splat || noAudio) return
 
   let player
   try {
@@ -197,47 +197,57 @@ function claim(file, volume) {
     console.log('zepp audio: this watch has no player - ' + error)
     noAudio = true
     noteAudio(false)
-    return null
+    return
   }
-  // Not a throw and not a player: the one instance is already spoken for. Only this sound
-  // is lost, so nothing global is set - the player that was handed out is working.
+  // Not a throw and not a player. With the music gone, nothing else in this app asks for
+  // one - so this is something outside the game holding the device's only instance, and it
+  // says nothing about whether this watch can play audio. Deliberately not recorded as a
+  // refusal: the home screen must not start claiming the watch is mute because of it.
   if (!player) {
-    console.log('zepp audio: no player available for ' + file)
-    return null
+    console.log('zepp audio: no player available')
+    return
   }
 
-  const sound = {
+  splat = {
     player,
-    file,
-    volume,
     ready: false,
     waiting: null,
-    onReady: null,
-    // When this sound stops being audible, as far as anything here can tell.
     playingUntil: 0,
+    chaseUntil: 0,
     durationMs: ASSUMED_DURATION_MS,
   }
 
   player.addEventListener(player.event.PREPARE, (result) => {
+    if (!splat) return
     if (!prepared(result)) {
-      clearWait(sound)
-      console.log('zepp audio: ' + file + ' would not prepare - ' + JSON.stringify(result))
+      clearWait(splat)
+      console.log('zepp audio: splat would not prepare - ' + JSON.stringify(result))
       return
     }
-    // The one moment this player is known to be loaded, which is the only way to find out
+    // The one moment this player is known to be loaded, and so the only chance to learn
     // what "loaded" looks like to getStatus() on this device.
-    if (readyStatus === null) readyStatus = statusOf(sound)
-    arm(sound, 'prepared')
+    if (readyStatus === null) readyStatus = statusOf(splat)
+    arm(splat, 'prepared')
   })
 
-  return sound
+  // Kept armed between hits. Playback ending can leave the player somewhere that refuses
+  // `start()`, and finding that out on the next tap is exactly the delay this exists to
+  // avoid: the reload happens in the quiet after a splat rather than in front of one.
+  player.addEventListener(player.event.COMPLETE, () => {
+    if (!splat) return
+    splat.playingUntil = 0
+    if (!soundOn() || isLoaded(splat)) return
+    load(splat)
+  })
+
+  load(splat)
 }
 
 function arm(sound, why) {
   if (sound.ready) return
   clearWait(sound)
   sound.ready = true
-  attempt(sound, 'setVolume', () => sound.player.setVolume(sound.volume))
+  attempt('setVolume', () => sound.player.setVolume(SPLAT_VOLUME))
   // Only answerable once the file is loaded, and only worth asking once. Seconds, per the
   // documentation; anything absurd is ignored rather than believed.
   try {
@@ -247,10 +257,14 @@ function arm(sound, why) {
     // The assumed length is close enough for what it decides.
   }
   noteAudio(true)
-  console.log('zepp audio: ' + sound.file + ' ready (' + why + ')')
-  const then = sound.onReady
-  sound.onReady = null
-  if (then) then(sound)
+  console.log('zepp audio: splat ready (' + why + ')')
+
+  // A whack refused while this was loading, still recent enough to belong to the fruit
+  // that caused it.
+  const now = Date.now()
+  const chasing = now < sound.chaseUntil
+  sound.chaseUntil = 0
+  if (chasing) begin(sound, now)
 }
 
 /**
@@ -263,11 +277,11 @@ function load(sound) {
   sound.ready = false
   clearWait(sound)
   const ok =
-    attempt(sound, 'setSource', () =>
-      sound.player.setSource(sound.player.source.FILE, { file: sound.file }),
-    ) && attempt(sound, 'prepare', () => sound.player.prepare())
+    attempt('setSource', () =>
+      sound.player.setSource(sound.player.source.FILE, { file: SPLAT_FILE }),
+    ) && attempt('prepare', () => sound.player.prepare())
   if (!ok) {
-    console.log('zepp audio: ' + sound.file + ' would not load')
+    console.log('zepp audio: splat would not load')
     noteAudio(false)
     return
   }
@@ -282,14 +296,14 @@ function clearWait(sound) {
 
 /** `start()`, and the truth about whether it started. */
 function begin(sound, now) {
-  if (!attempt(sound, 'start', () => sound.player.start())) return false
-  sound.playingUntil = (now || Date.now()) + sound.durationMs + PLAYING_SLACK_MS
+  if (!attempt('start', () => sound.player.start())) return false
+  sound.playingUntil = now + sound.durationMs + PLAYING_SLACK_MS
   return true
 }
 
-/** Whether this sound is still sounding, by the clock rather than by a status code. */
+/** Whether the sample is still sounding, by the clock rather than by a status code. */
 function isPlaying(sound, now) {
-  return (now || Date.now()) < sound.playingUntil
+  return now < sound.playingUntil
 }
 
 /**
@@ -304,82 +318,12 @@ function isLoaded(sound) {
 }
 
 /**
- * Starts the music, and keeps it going.
- *
- * On every device seen so far this gets nothing, because the splat has already taken the
- * only player - see the header. It is kept because the failure is free and a device with
- * two players would simply work.
- *
- * There is no loop flag in the API, so the loop is a COMPLETE handler that starts the
- * track again. That leaves an audible gap of however long a restart takes - which is why
- * the file is cut to a whole number of musical phrases with its seam crossfaded closed
- * (tools/generate_zepp_audio.py): the wrap should at least land somewhere the music was
- * going to breathe anyway.
- */
-export function startMusic() {
-  if (!soundOn()) return
-  musicWanted = true
-
-  if (music) {
-    if (music.ready) begin(music)
-    return
-  }
-
-  music = claim(MUSIC_FILE, MUSIC_VOLUME)
-  if (!music) return
-
-  // A finished track has to be re-loaded rather than merely restarted, for the same reason
-  // a stopped one does: playback ending leaves the player somewhere `start()` may refuse.
-  music.player.addEventListener(music.player.event.COMPLETE, () => {
-    music.playingUntil = 0
-    if (!musicWanted || !soundOn()) return
-    if (isLoaded(music) && begin(music)) return
-    music.onReady = (sound) => musicWanted && soundOn() && begin(sound)
-    load(music)
-  })
-
-  // The page may be left, or the sound switched off, during the prepare.
-  music.onReady = (sound) => musicWanted && soundOn() && begin(sound)
-  load(music)
-}
-
-export function stopMusic() {
-  musicWanted = false
-  if (music) halt(music)
-}
-
-/**
- * Loads the splat sound without playing it.
- *
- * Called on the countdown so that the first hit of a run is as loud and as prompt as the
- * hundredth. Preparing on the first hit instead would silence it and land its sound on
- * whatever happened next.
- */
-export function primeSplat() {
-  if (!soundOn() || splat) return
-  splat = claim(SPLAT_FILE, SPLAT_VOLUME)
-  if (!splat) return
-
-  // Kept armed between hits. Playback ending can leave the player in a state that refuses
-  // `start()`, and finding that out on the next tap is exactly the delay this is here to
-  // avoid: the reload happens in the quiet after a splat instead of in front of one.
-  splat.player.addEventListener(splat.player.event.COMPLETE, () => {
-    if (!splat) return
-    splat.playingUntil = 0
-    if (!soundOn() || isLoaded(splat)) return
-    load(splat)
-  })
-
-  load(splat)
-}
-
-/**
  * A whack.
  *
- * A hit landing while the last splat is still sounding retriggers it from the top rather
- * than queueing behind it or being dropped - one voice is all the device has, so the
- * newest hit gets it. `seek` and not `stop()`+`start()`: stopping unloads the file and
- * leaves `start()` answering false, which is what made hits lag and then fall silent.
+ * One voice, so the newest hit takes it: a whack landing while the last splat is sounding
+ * seeks back to the top rather than queueing behind it or being dropped. `seek` and not
+ * `stop()`+`start()` - stopping unloads the file and leaves `start()` answering false,
+ * which is what made hits lag and then fall silent.
  *
  * Fire and forget past that. Nothing here is worth failing a tap over.
  */
@@ -388,49 +332,44 @@ export function playSplat(now) {
   if (now - lastSplatMs < SPLAT_MIN_GAP_MS) return
   lastSplatMs = now
 
-  if (isPlaying(splat, now) && attempt(splat, 'seek', () => splat.player.seek(0))) {
+  if (isPlaying(splat, now) && attempt('seek', () => splat.player.seek(0))) {
     splat.playingUntil = now + splat.durationMs + PLAYING_SLACK_MS
     return
   }
   if (begin(splat, now)) return
 
-  // Refused: the player is not where it was thought to be. Put the file back so the next
-  // hit is prompt - and deliberately do not chase this one, because a splat that arrives
-  // a third of a second after the fruit it belongs to is worse than a splat that is missed.
+  // Refused: the player is not where it was thought to be. Put the file back, and play
+  // this hit when it lands if the fruit it belongs to is still recent - see CHASE_MS.
+  splat.chaseUntil = now + CHASE_MS
   load(splat)
 }
 
-/** Stops a sound, which on this platform also unloads it. */
+/** Stops the sample, which on this platform also unloads it. */
 function halt(sound) {
-  attempt(sound, 'stop', () => sound.player.stop())
+  attempt('stop', () => sound.player.stop())
   sound.ready = false
   sound.playingUntil = 0
+  sound.chaseUntil = 0
   clearWait(sound)
 }
 
 function hush() {
-  musicWanted = false
-  if (music) halt(music)
   if (splat) halt(splat)
 }
 
 /**
  * Hands the hardware back.
  *
- * A page that leaves without doing this keeps the audio route open, which on a watch is
- * both a battery cost and a music player that carries on into whatever the player looks at
- * next. It also hands back the one instance the device has - not immediately, since
- * releasing and re-creating on the same tick still fails, but by the time the player has
- * walked back to the home screen and pressed Play again it is free, which is the only
- * timing that matters.
+ * A page that leaves without doing this keeps the audio route open, which on a watch is a
+ * battery cost. It also hands back the one player instance the device has - not
+ * immediately, since releasing and re-creating on the same tick still fails, but by the
+ * time the player has walked back to the home screen and pressed Play again it is free,
+ * which is the only timing that matters.
  */
 export function release() {
-  musicWanted = false
-  for (const sound of [splat, music]) {
-    if (!sound) continue
-    halt(sound)
-    attempt(sound, 'release', () => sound.player.release())
+  if (splat) {
+    halt(splat)
+    attempt('release', () => splat.player.release())
   }
-  music = null
   splat = null
 }

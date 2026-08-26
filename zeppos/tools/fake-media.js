@@ -33,9 +33,23 @@ export const config = {
   stateAfterComplete: PREPARED,
   prepareMs: 20,
   durationMs: 325,
+  /**
+   * Refuse the next `start()` once, whatever state the player is in.
+   *
+   * Not a device behaviour anybody has seen - a lever, so the recovery path can be tested
+   * on purpose rather than waited for. Everything about that path is reachable in real
+   * life (a player that has been stopped, or armed by the grace timer before the file was
+   * really loaded); what is not reachable is arranging it on cue.
+   */
+  refuseNextStart: false,
 }
 
-const DEFAULTS = { stateAfterComplete: PREPARED, prepareMs: 20, durationMs: 325 }
+const DEFAULTS = {
+  stateAfterComplete: PREPARED,
+  prepareMs: 20,
+  durationMs: 325,
+  refuseNextStart: false,
+}
 
 let live = null
 
@@ -102,6 +116,10 @@ class FakePlayer {
   }
 
   start() {
+    if (config.refuseNextStart) {
+      config.refuseNextStart = false
+      return this.log('start', false)
+    }
     if (this.state !== PREPARED) return this.log('start', false)
     this.state = STARTED
     this.playCount++
