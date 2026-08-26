@@ -6,29 +6,31 @@ import { BasePage } from '@zeppos/zml/base-page'
 import { REQ_BOARD, SCOPE_ALL_TIME, SCOPE_WEEKLY } from '../../shared/protocol.js'
 import { secondsLabel, ordinal } from '../../shared/format.js'
 import { ACCENT, CREAM, CREAM_DIM, CREAM_FAINT, PANEL, rankColor } from '../../shared/theme.js'
-import { SCREEN_W, CAPTION_FONT, BODY_FONT } from '../../shared/layout.js'
-import { ground, text, button, show, setText } from '../../shared/widgets.js'
-
-// The list is inset far enough that its bottom row still clears the rim: it ends at
-// y=366, where the glass is 428px wide, and the list is 368.
-const TITLE_Y = px(40)
-const SCOPE_Y = px(84)
-const SCOPE_X = px(150)
-const SCOPE_W = px(180)
-const LIST_X = px(56)
-const LIST_W = SCREEN_W - px(112)
-const LIST_Y = px(138)
-const LIST_H = px(228)
-const ROW_H = px(64)
-const STANDING_Y = px(372)
-const STANDING_X = px(96)
-
-const RANK_X = px(12)
-const RANK_W = px(52)
-const NAME_X = px(70)
-const NAME_W = px(180)
-const SCORE_X = px(256)
-const SCORE_W = px(100)
+import {
+  SCREEN_W,
+  CAPTION_FONT,
+  BODY_FONT,
+  // In layout.js rather than here: on round the list is inset far enough that its bottom
+  // row still clears the rim, and on square there is no rim and the inset is halved.
+  BOARD_TITLE_Y as TITLE_Y,
+  BOARD_SCOPE_Y as SCOPE_Y,
+  BOARD_SCOPE_X as SCOPE_X,
+  BOARD_SCOPE_W as SCOPE_W,
+  BOARD_LIST_X as LIST_X,
+  BOARD_LIST_W as LIST_W,
+  BOARD_LIST_Y as LIST_Y,
+  BOARD_LIST_H as LIST_H,
+  BOARD_ROW_H as ROW_H,
+  BOARD_STANDING_Y as STANDING_Y,
+  BOARD_STANDING_X as STANDING_X,
+  BOARD_RANK_X as RANK_X,
+  BOARD_RANK_W as RANK_W,
+  BOARD_NAME_X as NAME_X,
+  BOARD_NAME_W as NAME_W,
+  BOARD_SCORE_X as SCORE_X,
+  BOARD_SCORE_W as SCORE_W,
+} from '../../shared/layout.js'
+import { ground, text, button, show, setText, hideStatusBar } from '../../shared/widgets.js'
 
 let list = null
 let scopeButton = null
@@ -65,6 +67,9 @@ let alive = false
 Page(
   BasePage({
     build() {
+      // Square watches draw their app name over the top of the page; see widgets.js.
+      hideStatusBar()
+
       alive = true
       list = null
       scope = SCOPE_ALL_TIME

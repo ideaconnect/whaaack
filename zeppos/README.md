@@ -3,15 +3,15 @@
 The wrist edition. Nine tiles instead of sixteen, one finger instead of two thumbs, and a
 leaderboard of its own.
 
-Zepp OS 3.0 (API level 3.0) · round screens · built with `zeus`
+Zepp OS 3.0 (API level 3.0) · round and square screens · built with `zeus`
 
 ---
 
 ## Why it is a separate game
 
 The phone game is a 4x4 board tapped with two thumbs on a screen the size of a paperback.
-This is a 3x3 board tapped with one finger on a 46mm circle, where the finger doing the
-tapping also hides the tile it is travelling to. The two produce completely different
+This is a 3x3 board tapped with one finger on a 46mm watch face, where the finger doing
+the tapping also hides the tile it is travelling to. The two produce completely different
 numbers, so:
 
 - **the boards are separate.** `zepp_scores` is its own table with its own RPCs
@@ -211,11 +211,28 @@ wide, so they tile the grid with no dead gutter: a tap between two tiles goes to
 one instead of to nothing, which at five fruit a second is the difference between a near
 miss and a strike.
 
-Layout is [`shared/layout.js`](shared/layout.js), in design pixels for a 480px screen, with
-`px()` rescaling for anything else. The constraint that decides everything is that a round
-screen has no corners: a square inscribed in a 480px circle is only 339px on a side, so the
-grid is centred slightly low and every corner is checked against the rim rather than
-eyeballed.
+Layout is [`shared/layout.js`](shared/layout.js): two tables of design pixels, one per
+screen shape, and one set of exported names that every page reads. Only that file knows
+which shape it is on.
+
+**Round, 480x480.** The constraint that decides everything is that a round screen has no
+corners: a square inscribed in a 480px circle is only 339px on a side, so the grid is
+centred slightly low and every corner is checked against the rim rather than eyeballed.
+
+**Square, 390x450.** The opposite problem. There is no rim, so the margins drop from 52 to
+24 and the tile grows from 92 to 104 - but the screen is *portrait*, and a square grid as
+wide as this one allows is nearly as tall as the screen has left once the HUD is placed. So
+the budget is spent explicitly: HUD 0..92, grid 100..432, and 18px under the bottom row.
+
+The square numbers are chosen against 390x450 rather than rescaled from the round ones. A
+rescale would carry the rim allowances onto a screen with no rim - a 52px margin exists to
+keep text off a curve that is not there - and would spend the width they cost on nothing.
+
+Square watches also draw the app's name across the top of every page, over the page rather
+than beside it, and on the game screen it lands exactly on the miss pips: the first square
+build showed the lives hidden behind the word "Whaaack!". `hideStatusBar` in
+[`shared/widgets.js`](shared/widgets.js) turns it off, and is a no-op where the API is
+absent, which is every round device.
 
 ## Black, and what it costs
 
@@ -420,7 +437,7 @@ discoverable during a run.
 ```bash
 python ../tools/sync_zepp_secrets.py   # writes shared/secrets.js from ../local.properties
 npm install
-zeus build                             # dist/*.zab, every round resolution
+zeus build                             # dist/*.zab, every resolution of both shapes
 zeus dev -t "Amazfit Balance"          # or any target, onto the simulator
 zeus preview                           # onto a paired watch
 ```
@@ -505,11 +522,26 @@ with `target="_blank"`, so the rows open a browser rather than doing nothing.
 
 ## Devices
 
-API level 3.0 with a round 480px design width, which covers everything from Amazfit Balance
-(the reason for 3.0 — it tops out at API 3.7) up through the T-Rex 3, T-Rex 3 Pro, T-Rex
-Ultra 2, Balance 2/3 and Balance Ultra. `zeus build` emits a zpk per round resolution and
-Zepp OS rescales both the coordinates and the bitmaps, so the 466px 44mm T-Rex 3 Pro needs
-no separate layout.
+API level 3.0, with two platforms declared in `app.json`: round at a 480px design width and
+square at 390px.
+
+Round covers everything from Amazfit Balance (the reason for 3.0 — it tops out at API 3.7)
+up through the T-Rex 3, T-Rex 3 Pro, T-Rex Ultra 2, Balance 2/3 and Balance Ultra. Square
+covers the Active 2 Square, Active, Bip 6, Cheetah Square, GTS 4 and Bip 5 family.
+
+`zeus build` emits a zpk per resolution of each shape — twelve of them — and the build
+rescales both the coordinates and the bitmaps by `device width / design width`, which is
+the same ratio `px()` uses. Artwork and layout therefore stay in step for free, and the
+466px 44mm T-Rex 3 Pro and the 320px Bip 5 both need a layout of their own no more than the
+480px watch does.
+
+That rescaling is also why there are two asset folders. `assets/default.r` and
+`assets/default.s` hold the same pictures drawn for two different design spaces: a square
+tile is 104 design pixels against the round 92, so its fruit is drawn at 72 rather than 64
+and its splat at 122 rather than 108. Everything measured against the screen rather than
+against a tile — the badges, the icon, the tap target — and the splat sound, which sounds
+the same on any shape, are identical in both. Writing the sound to only one folder is not a
+smaller package but a silent watch, which is how the first square build shipped.
 
 Sound needs a speaker, which not every one of them has, and the game is written to be
 played silently on the ones that do not.

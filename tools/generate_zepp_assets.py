@@ -62,6 +62,21 @@ FRUIT_KT = ROOT / "app" / "src" / "main" / "java" / "tech" / "idct" / "whaaack" 
 ICON_SRC = ROOT / "assets" / "icon" / "icon-2.png"
 OUT = ROOT / "zeppos" / "assets" / "default.r"
 
+# One folder of artwork per screen shape, which is what zeus expects: it picks
+# `assets/default.<screenType>` for each platform in app.json and then rescales everything
+# in it by `device width / design width`. So these are not two resolutions of the same
+# picture - they are the same picture drawn for two different design spaces, 480 wide for
+# round and 390 for square, and the build takes care of every real device in between.
+#
+# Only the two sizes that are measured against a *tile* differ. A square tile is 104 design
+# pixels against the round 92, because a square screen has corners to use, and a fruit that
+# stayed at 64 would sit in it looking lost. Badges, the icon and the tap target are
+# measured against the screen or against nothing, and are the same in both.
+SHAPES = (
+    {"dir": "default.r", "name": "round  480", "fruit": 64, "splat": 108},
+    {"dir": "default.s", "name": "square 390", "fruit": 72, "splat": 122},
+)
+
 # Matches ic_launcher_background / orchard_night. The watch game itself is black now (see
 # zeppos/shared/theme.js), but an app icon is drawn on the Zepp app's list rather than on
 # one of our pages, so it keeps the brand colour behind it.
@@ -110,6 +125,20 @@ STORE_OUT = ROOT / "assets" / "zepp"
 # The artwork sits inside its own tile rather than flush to the edge, so the round
 # crop never shaves the splat.
 ICON_ART_DIA = 206
+
+
+def use_shape(shape: dict) -> None:
+    """Point the builders at one shape's folder and sizes.
+
+    Rebinding module globals rather than threading a profile through nine signatures.
+    Every builder already reads these three by name, the two shapes are built one after the
+    other and never at once, and the alternative is a parameter that eight of the nine
+    functions would only pass along.
+    """
+    global OUT, FRUIT_PX, SPLAT_PX
+    OUT = ROOT / "zeppos" / "assets" / shape["dir"]
+    FRUIT_PX = shape["fruit"]
+    SPLAT_PX = shape["splat"]
 
 
 def build_fruits() -> tuple[int, list[str]]:
@@ -289,20 +318,27 @@ def main() -> int:
     ap.add_argument("--preview", action="store_true", help="also write tools/zepp-preview.png")
     args = ap.parse_args()
 
-    OUT.mkdir(parents=True, exist_ok=True)
-    fruit_bytes, fruits = build_fruits()
-    splat_bytes, splat_count = build_splats()
-    badge_bytes, badge_count = build_badges()
-    icon_bytes = build_icon()
-    store_icon_bytes = build_store_icon()
-    tap_bytes = build_tap_target()
+    fruits: list[str] = []
+    for shape in SHAPES:
+        use_shape(shape)
+        OUT.mkdir(parents=True, exist_ok=True)
+        fruit_bytes, fruits = build_fruits()
+        splat_bytes, splat_count = build_splats()
+        badge_bytes, badge_count = build_badges()
+        icon_bytes = build_icon()
+        tap_bytes = build_tap_target()
 
-    print(f"{len(fruits)} fruit at {FRUIT_PX}px: {fruit_bytes:,} bytes")
-    print(f"{splat_count} splats at {SPLAT_PX}px: {splat_bytes:,} bytes")
-    print(f"{badge_count} badges at {BADGE_PX}px: {badge_bytes:,} bytes")
-    print(f"icon at {ICON_PX}px: {icon_bytes:,} bytes")
+        print(f"{shape['name']}  ->  zeppos/assets/{shape['dir']}")
+        print(f"  {len(fruits)} fruit at {FRUIT_PX}px: {fruit_bytes:,} bytes")
+        print(f"  {splat_count} splats at {SPLAT_PX}px: {splat_bytes:,} bytes")
+        print(f"  {badge_count} badges at {BADGE_PX}px: {badge_bytes:,} bytes")
+        print(f"  icon at {ICON_PX}px: {icon_bytes:,} bytes")
+        print(f"  transparent tap target at {TAP_PX}px: {tap_bytes:,} bytes")
+
+    # Uploaded by hand to the developer console rather than packaged, so it is built once
+    # and belongs to no shape.
+    store_icon_bytes = build_store_icon()
     print(f"store icon at {STORE_ICON_PX}px: {store_icon_bytes:,} bytes -> assets/zepp/")
-    print(f"transparent tap target at {TAP_PX}px: {tap_bytes:,} bytes")
 
     if args.preview:
         write_preview(fruits)

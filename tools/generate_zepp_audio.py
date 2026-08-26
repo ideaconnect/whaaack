@@ -45,7 +45,16 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 AUDIO_SRC = ROOT / "app" / "src" / "main" / "assets" / "audio"
-OUT = ROOT / "zeppos" / "assets" / "default.r"
+# One folder per screen shape, because that is how zeus picks assets - and the sound is
+# the one asset that is the same in both. The artwork differs (a square tile is bigger, so
+# its fruit is drawn bigger; see generate_zepp_assets.py) but a splat sounds the same on a
+# square watch as on a round one, so the same file goes to both. Writing it to only one is
+# not a smaller package, it is a silent watch: the first square build shipped with no audio
+# in it at all, which showed up in the .zab rather than anywhere a person would have looked.
+OUTS = (
+    ROOT / "zeppos" / "assets" / "default.r",
+    ROOT / "zeppos" / "assets" / "default.s",
+)
 
 SPLAT_SRC = AUDIO_SRC / "splats" / "splat_quick.wav"
 
@@ -109,11 +118,11 @@ def main() -> int:
     if args.probe:
         return 0
 
-    OUT.mkdir(parents=True, exist_ok=True)
-    splat = OUT / "splat.mp3"
-    gain = build_splat(splat)
-
-    print(f"\n{splat.name}: {splat.stat().st_size:,} bytes ({gain:+.2f}dB)")
+    for out in OUTS:
+        out.mkdir(parents=True, exist_ok=True)
+        splat = out / "splat.mp3"
+        gain = build_splat(splat)
+        print(f"{splat.relative_to(ROOT)}: {splat.stat().st_size:,} bytes ({gain:+.2f}dB)")
     return 0
 
 

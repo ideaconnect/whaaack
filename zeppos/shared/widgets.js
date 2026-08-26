@@ -135,3 +135,16 @@ export function setAlpha(widget, alpha) {
 export function setX(widget, x) {
   if (widget) widget.setProperty(hmUI.prop.MORE, { x })
 }
+
+/**
+ * Takes back the strip a square watch spends on a system title bar.
+ *
+ * Square devices draw the app's name across the top of every page, over the page rather
+ * than beside it - and on the game screen it lands exactly on the miss pips, so the first
+ * square build showed the lives hidden behind the word "Whaaack!". The API is documented
+ * as square-only, hence the guard rather than a shape test: whether it is there at all is
+ * the question being asked, and on a round watch the answer is no.
+ */
+export function hideStatusBar() {
+  if (typeof hmUI.setStatusBarVisible === 'function') hmUI.setStatusBarVisible(false)
+}

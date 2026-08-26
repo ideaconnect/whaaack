@@ -20,19 +20,17 @@ import {
   SOUND_Y,
   SOUND_W,
   SOUND_H,
+  // Where this page's rows sit. In layout.js rather than here because the answer differs
+  // between a round screen and a square one, and only that file knows which this is.
+  HOME_TITLE_Y as TITLE_Y,
+  HOME_TAGLINE_Y as TAGLINE_Y,
+  HOME_BEST_Y as BEST_Y,
+  HOME_PLAY_Y as PLAY_Y,
+  HOME_BOARD_Y as BOARD_Y,
+  HOME_ACCOUNT_Y as ACCOUNT_Y,
+  HOME_ACCOUNT_X as ACCOUNT_X,
 } from '../../shared/layout.js'
-import { ground, text, button, setText } from '../../shared/widgets.js'
-
-// Design pixels on the 480px circle. The bottom line is the one that needs checking: it
-// wraps to two lines ending at y=414, where the glass is 330px wide, so its 312px column
-// clears the rim. A third line would not - which is why the copy under it is short.
-const TITLE_Y = px(62)
-const TAGLINE_Y = px(114)
-const BEST_Y = px(148)
-const PLAY_Y = px(190)
-const BOARD_Y = px(278)
-const ACCOUNT_Y = px(356)
-const ACCOUNT_X = px(84)
+import { ground, text, button, setText, hideStatusBar } from '../../shared/widgets.js'
 
 let bestLabel = null
 let soundButton = null
@@ -53,6 +51,9 @@ let alive = false
 Page(
   BasePage({
     build() {
+      // Square watches draw their app name over the top of the page; see widgets.js.
+      hideStatusBar()
+
       alive = true
       ground()
 
