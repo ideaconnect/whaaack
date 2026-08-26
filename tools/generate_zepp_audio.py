@@ -59,9 +59,25 @@ OUTS = (
 SPLAT_SRC = AUDIO_SRC / "splats" / "splat_quick.wav"
 
 SAMPLE_RATE = 32000
-# The splat is a third of a second, so its bitrate costs nothing and there is no reason
-# to spend transients on saving three kilobytes.
+# The splat is a sixth of a second, so its bitrate costs nothing and there is no reason
+# to spend transients on saving two kilobytes.
 SPLAT_KBPS = 96
+
+# How much of the source to keep, and how long to fade it out over.
+#
+# `splat_quick.wav` is 325ms and is not one impact but two: the attack at 20ms, and a
+# second transient at 180ms that carries another eighth of the energy. On the phone that
+# is fine - a SoundPool mixes, so a hit landing mid-splat simply plays over it. The watch
+# has one voice and no mixing, so the length of this file is the length of time a whack
+# cannot be heard, and a sample with a second hit buried in it is twice as long as it needs
+# to be for no gain the player can hear.
+#
+# So the tail goes. The cut lands before the second transient with a fade closing it, which
+# keeps the whole attack and its decay - 84% of the energy in 46% of the time - and turns
+# the sample into what the game actually needs: one whack, one sound, over quickly enough
+# that the next whack finds the voice free.
+SPLAT_KEEP_S = 0.150
+SPLAT_FADE_S = 0.030
 
 # Headroom under full scale. Peak-normalised because it is the only thing the watch plays
 # and it has to carry on a speaker the size of a grain of rice.
@@ -89,9 +105,13 @@ def peak_dbfs(path: Path) -> float:
 
 def build_splat(dest: Path) -> float:
     gain = SPLAT_PEAK_DBFS - peak_dbfs(SPLAT_SRC)
+    fade_at = SPLAT_KEEP_S - SPLAT_FADE_S
     ffmpeg(
         "-i", str(SPLAT_SRC),
-        "-af", f"volume={gain:.2f}dB",
+        "-af",
+        f"atrim=0:{SPLAT_KEEP_S},asetpts=N/SR/TB,"
+        f"afade=t=out:st={fade_at}:d={SPLAT_FADE_S}:curve=qsin,"
+        f"volume={gain:.2f}dB",
         "-ac", "1", "-ar", str(SAMPLE_RATE), "-b:a", f"{SPLAT_KBPS}k",
         # No tags: nothing on the watch reads them. The Xing header stays, though - it is
         # the two hundred bytes that tell a decoder how much of the first and last frame is
@@ -114,6 +134,7 @@ def main() -> int:
         raise SystemExit(f"missing source: {SPLAT_SRC}")
 
     print(f"source:  {SPLAT_SRC.relative_to(ROOT)}")
+    print(f"trim:    first {SPLAT_KEEP_S * 1000:.0f}ms, fading out over the last {SPLAT_FADE_S * 1000:.0f}ms")
     print(f"encode:  mono {SAMPLE_RATE}Hz, {SPLAT_KBPS}kbps, peak-normalised to {SPLAT_PEAK_DBFS}dBFS")
     if args.probe:
         return 0

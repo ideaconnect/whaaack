@@ -32,7 +32,19 @@ export const config = {
   /** Whether playback ending leaves the file loaded, or unloaded as `stop()` does. */
   stateAfterComplete: PREPARED,
   prepareMs: 20,
-  durationMs: 325,
+  /** What tools/generate_zepp_audio.py actually produces. */
+  durationMs: 150,
+  /** Refuse every `setSource`, so a reload cannot succeed. */
+  refuseSetSource: false,
+  /**
+   * Load the file but never announce it.
+   *
+   * A real watch was observed doing exactly this - it is why PREPARE_GRACE_MS exists - and
+   * it changes far more than it looks: with no event, `readyStatus` is never learned, so
+   * `isLoaded` has no opinion and the COMPLETE handler stops reloading. Everything the app
+   * knows about the player on such a watch comes from a timer.
+   */
+  noPrepareEvent: false,
   /**
    * Refuse the next `start()` once, whatever state the player is in.
    *
@@ -47,8 +59,10 @@ export const config = {
 const DEFAULTS = {
   stateAfterComplete: PREPARED,
   prepareMs: 20,
-  durationMs: 325,
+  durationMs: 150,
+  refuseSetSource: false,
   refuseNextStart: false,
+  noPrepareEvent: false,
 }
 
 let live = null
@@ -99,6 +113,7 @@ class FakePlayer {
   }
 
   setSource(kind, obj) {
+    if (config.refuseSetSource) return this.log('setSource', false)
     if (kind !== this.source.FILE || !obj || !obj.file) return this.log('setSource', false)
     this.state = INITIALIZED
     return this.log('setSource', true)
@@ -110,6 +125,8 @@ class FakePlayer {
     setTimeout(() => {
       if (this.state !== PREPARING) return
       this.state = PREPARED
+      // The file is loaded either way. Whether anybody is told is the lever.
+      if (config.noPrepareEvent) return
       this.fire(this.event.PREPARE, true)
     }, config.prepareMs)
     return this.log('prepare', true)
@@ -135,10 +152,16 @@ class FakePlayer {
     }, config.durationMs)
   }
 
+  /**
+   * Answers true and does nothing, which is what a real watch does.
+   *
+   * This is not a shortcut in the fake - it is the finding. `seek(0)` reads like the way to
+   * retrigger a sample, reports success, and leaves the speaker playing exactly what it was
+   * playing. A version of this fake that restarted the sound here would have gone on
+   * agreeing with a release in which hits during a splat were silently lost.
+   */
   seek() {
     if (this.state !== STARTED) return this.log('seek', false)
-    this.playCount++
-    this.armCompletion()
     return this.log('seek', true)
   }
 

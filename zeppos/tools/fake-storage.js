@@ -16,3 +16,8 @@ export const localStorage = {
 export function clearAll() {
   store.clear()
 }
+
+/** What the app believes about this watch, for the checks to read back. */
+export function peek(key) {
+  return store.get(key)
+}
