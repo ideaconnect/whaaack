@@ -116,4 +116,4 @@ msgid "resetSentBody"
 msgstr "If that address has an account, a link to set a new password is on its way to it. The link is good for 30 minutes."
 
 msgid "resetSentWhere"
-msgstr "Open it on this phone — it hands you over to the Whaaack! Android app to choose the new password. Then come back here and sign in."
+msgstr "Open it on this phone and choose the new password on the page it opens — nothing to install. Then come back here and sign in."

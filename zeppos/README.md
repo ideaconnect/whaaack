@@ -70,20 +70,25 @@ because saying otherwise would confirm the address exists to anyone who asks. Re
 it is indistinguishable from success, and the player would be told to watch an inbox nothing
 was ever going to arrive in.
 
-### Where a confirmation link lands
+### Where an emailed link lands
 
 Not in the Android app. `site_url` is `whaaack://auth`, a deep link only the phone game can
 answer, and that is the right destination *for the phone game* — the app is by definition
-installed. It is the wrong one here. An account can be created start to finish from this
-settings page by somebody who has never installed the Android version and has no reason to,
-and handing them a link their phone cannot open is a dead end on the last step of signing
-up.
+installed. It is the wrong one here. An account can be created, confirmed and recovered
+start to finish from this settings page by somebody who has never installed the Android
+version and has no reason to, and handing them a link their phone cannot open is a dead end
+at the exact moment they are trying to get in.
 
-So the watch's signup asks for [`website/auth/`](../website/auth/index.html) instead —
-a page that says the address is confirmed and needs nothing installed. Which flow a link
-belongs to is decided per request, by the `redirect_to` on the call that sends the mail, so
-the phone game is untouched and **no project setting changes**:
-`https://idct.tech/whaaack/auth` is already on `additional_redirect_urls`.
+So both of the watch's mails ask for [`website/auth/`](../website/auth/index.html) instead —
+a page that needs nothing installed. Confirmation is the easy half: the answer is a
+sentence. Recovery is the half that needs somewhere to *type* a new password, so the page
+carries a form; the link arrives already verified by GoTrue, with a real short-lived session
+in the fragment, and the form spends it on one `PUT /auth/v1/user`.
+
+Which flow a link belongs to is decided per request, by the `redirect_to` on the call that
+sends the mail, so the phone game is untouched — its own resets still open the app — and
+**no project setting changes**: `https://idct.tech/whaaack/auth` is already on
+`additional_redirect_urls`.
 
 The exact spelling of that string matters more than it looks. GoTrue matches `redirect_to`
 against the allow list and *silently substitutes `site_url`* when it does not match — no
@@ -129,26 +134,26 @@ player would think that trying to change their password had signed them out.
 
 **Resetting it** sits under the sign-in button and uses the address already in the form,
 because somebody who wants a reset has almost always just failed to sign in with it. It
-posts to `/auth/v1/recover?redirect_to=whaaack://auth` — the same redirect
-`AuthRepository.sendPasswordReset` asks for.
+posts to `/auth/v1/recover?redirect_to=https://idct.tech/whaaack/auth`, so the link lands on
+the form described above rather than on the phone game's deep link. (`AuthRepository`
+`.sendPasswordReset` still asks for `whaaack://auth`, which is right for a caller that *is*
+the app.)
 
 The wording of what comes back is deliberate. GoTrue answers a recovery request for an
 address it has never seen exactly as it answers one for an address it knows, which is what
 stops this form being a way to ask whether somebody has an account — so the card says a
 link is on its way *if that address has an account*, and never claims a mail was sent.
 
-> **The gap that is left.** Confirmation links now land on the web (see above), but reset
-> links still go to the Android deep link, and deliberately so: the two are not the same
-> problem. Confirming an address is finished the moment the page loads. Setting a new
-> password needs somewhere to *type* one, and the only thing in this project that offers
-> that is the phone game. Pointing reset at the web page as it stands would move the dead
-> end rather than remove it.
->
-> So a watch-only player can still ask for a reset and have nowhere to spend it. Closing it
-> means a form on `website/auth/` that takes the recovery token out of the fragment and
-> PUTs a new password — perhaps forty lines, and none of it testable without sending a real
-> recovery mail to a real account, which is why it is written down here rather than guessed
-> at.
+> **What is still untested.** The form on `website/auth/` has been exercised against the
+> real project with a dead token — `node tools/check-auth-page.mjs` runs the page's own
+> script against a stub DOM and checks that every fragment shape picks the right branch, and
+> that a token GoTrue rejects is reported as an expired link rather than as a mystery. What
+> that cannot cover is the one path that needs a real recovery mail to a real account:
+> a live token being *accepted*. The request it makes is the same `PUT /auth/v1/user` the
+> settings page's own change-password already makes and `check-backend.mjs` already proves
+> against a live session, so the untested part is the token's provenance rather than the
+> call — but it is untested, and worth ten minutes with a throwaway account before anyone
+> relies on it.
 
 ## The rules
 

@@ -193,10 +193,22 @@ async function main() {
   )
 
   const recoverUrl = lastCall('/auth/v1/recover') || ''
+  // The same three failures to tell apart as the confirmation check below, for the same
+  // reason: GoTrue gives no sign when `redirect_to` is not on the allow list. It silently
+  // substitutes `site_url`, which here would address the one link a locked-out player was
+  // sent to an Android deep link they may well not be able to open.
+  const resetWhere = !recoverUrl
+    ? 'recover was never called'
+    : recoverUrl.split('?')[1] || 'called with no redirect_to at all'
   check(
-    'a reset link is addressed to the phone app',
-    recoverUrl.includes('redirect_to=' + encodeURIComponent('whaaack://auth')),
-    recoverUrl.split('?')[1],
+    'a reset link is addressed to the web page',
+    recoverUrl.includes('redirect_to=' + encodeURIComponent('https://idct.tech/whaaack/auth')),
+    resetWhere,
+  )
+  check(
+    'and not to an app a watch player may never have installed',
+    recoverUrl.length > 0 && !recoverUrl.includes(encodeURIComponent('whaaack://')),
+    resetWhere,
   )
 
   // ------------------------------------------------ where a confirmation link lands

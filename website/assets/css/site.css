@@ -349,6 +349,31 @@ p { margin: 0 0 1em; }
 .field textarea { resize: vertical; }
 .h-captcha { margin-bottom: 18px; }
 
+/* ---- password reset (/whaaack/auth/) -----------------------------------------------
+
+   One field and a way to read it back. There is no confirm-it-twice field, because that
+   field exists to catch a typo in text you cannot see — and the toggle beside this one
+   lets you see it. The watch's settings page makes the same trade for the same reason.
+
+   The toggle is sized off the input rather than given a height of its own, so the two
+   stay level whatever the font does. */
+.pw-row { display: flex; gap: 8px; align-items: stretch; }
+.pw-row input { flex: 1 1 auto; min-width: 0; }
+.pw-toggle {
+  flex: 0 0 auto;
+  padding: 0 16px;
+  border-radius: 14px;
+  border: 1.5px solid var(--line-strong);
+  background: rgba(255, 243, 230, .10);
+  color: var(--cream-dim);
+  font: inherit;
+  font-size: .86rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+.pw-toggle:hover { color: var(--cream); border-color: var(--accent); }
+.pw-hint { margin: 8px 0 0; font-size: .82rem; color: var(--cream-faint); }
+
 /* ---- footer ----------------------------------------------------------------------- */
 
 .footer { border-top: 1px solid var(--line); padding: 34px 0; margin-top: 40px; background: rgba(20, 10, 26, .72); }

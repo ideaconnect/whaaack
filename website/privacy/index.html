@@ -409,7 +409,11 @@
     <h2 id="recipients">5. Who else sees your data</h2>
     <ul>
       <li><strong>Supabase</strong> — our backend (database and authentication). A processor
-      acting on our instructions under a data processing agreement.</li>
+      acting on our instructions under a data processing agreement. The password-reset page on
+      this website (<code>/whaaack/auth/</code>) is the one page here that talks to it: follow a
+      reset link and the new password you type goes from your browser straight to Supabase, and
+      nowhere else. Your browser reaches
+      <code>pklrfcbyseitdbxkmsnw.supabase.co</code> only on that page.</li>
       <li><strong>Google Ireland / Google LLC (AdMob and UMP)</strong> — advertising. Google acts
       as an independent controller for advertising data.</li>
       <li><strong>Google (Sign-In)</strong> — if you choose Google Sign-In, Google is a separate

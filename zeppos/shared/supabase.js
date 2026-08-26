@@ -62,39 +62,33 @@ const BOARD_LIMIT = 20
 const MAX_MILLIS = 600000
 
 /**
- * Where a confirmation link lands.
+ * Where an emailed link lands - both kinds of link, one destination.
  *
  * Not `site_url`, which is `whaaack://auth` - a deep link only the Android app can answer.
  * That is the right destination for the phone game, where the app is by definition
- * installed, and the wrong one here: an account can be created start to finish from this
- * settings page by somebody who has never installed the Android version and has no reason
- * to, and handing them a link their phone cannot open is a dead end at the exact moment
- * they are trying to finish signing up.
+ * installed, and the wrong one here: an account can be created, confirmed and recovered
+ * start to finish from this settings page by somebody who has never installed the Android
+ * version and has no reason to. Handing them a link their phone cannot open is a dead end
+ * at the exact moment they are trying to get in.
  *
- * So the watch's signup asks for the web page instead, which says the address is confirmed
- * and needs nothing installed. Which flow a link belongs to is decided per request by this
- * parameter, so the phone game is untouched and no project setting changes.
+ * Confirmation was the easy half - the page only has to say the address is verified, and
+ * it needs nothing installed to say it. Recovery stayed broken longer, because setting a
+ * new password needs somewhere to *type* one, and for a while the only thing in this
+ * project that offered that was the Android app. It is not any more:
+ * `website/auth/index.html` grew a form that spends the recovery token the link arrives
+ * with, so this one constant now covers both flows.
+ *
+ * The phone game is untouched and keeps its own deep link - `AuthRepository`'s
+ * `sendPasswordReset` still asks for `whaaack://auth`, which is the right destination for
+ * a caller that *is* the app. Which flow a link belongs to is decided per request by this
+ * parameter, so no project setting changes for either.
  *
  * The exact spelling matters. GoTrue matches `redirect_to` against
  * `additional_redirect_urls` and *silently substitutes `site_url`* when it does not match -
  * no error, no clue, just a link that goes back to being an Android deep link. This string
  * is already on that list in `supabase/config.toml`; a trailing slash would not be.
  */
-const CONFIRM_REDIRECT = 'https://idct.tech/whaaack/auth'
-
-/**
- * Where a reset link lands: the phone game's deep link, the same one
- * `AuthRepository.sendPasswordReset` asks for, and the other address whitelisted in
- * `supabase/config.toml`.
- *
- * Still the deep link, unlike the confirmation above, because the two are not the same
- * problem. Confirming an address is over when the page loads; setting a new password needs
- * somewhere to type one, and the only thing in this project that offers that is the
- * Android app. A watch-only player can therefore ask for a reset and have nowhere to spend
- * it - a real gap, and one that closes with a form on the web page rather than with a
- * different constant here.
- */
-const RESET_REDIRECT = 'whaaack://auth'
+const AUTH_REDIRECT = 'https://idct.tech/whaaack/auth'
 
 /**
  * @param url            the project's base URL
@@ -283,7 +277,7 @@ export function createBackend({ url, anonKey, fetch, storage }) {
 
     setStatus({ state: AUTH_WORKING, email })
 
-    const result = await call('/auth/v1/signup?redirect_to=' + encodeURIComponent(CONFIRM_REDIRECT), {
+    const result = await call('/auth/v1/signup?redirect_to=' + encodeURIComponent(AUTH_REDIRECT), {
       method: 'POST',
       body: {
         email: String(email).trim(),
@@ -415,12 +409,12 @@ export function createBackend({ url, anonKey, fetch, storage }) {
    * of asking whether somebody has an account. So the success wording is conditional
    * ("if that address has an account") rather than a claim about what was sent.
    *
-   * `redirect_to` is the phone game's own deep link, matching
-   * `AuthRepository.sendPasswordReset`. It is the only destination this project has: the
-   * link has to land somewhere that can take a new password, and the only thing that can
-   * is the Android app. A watch-only player who never installed it can ask for the mail
-   * and then has nowhere to spend it - a real gap, and one that needs a web page rather
-   * than another line of client code.
+   * `redirect_to` is the web page rather than the phone game's deep link, and that is the
+   * whole difference for a watch-only player. The link has to land somewhere that can take
+   * a new password, and `website/auth/index.html` is now somewhere that can: it reads the
+   * recovery token out of the fragment GoTrue redirects it with and PUTs the new password
+   * itself, so somebody who has never installed the Android app finishes the flow in their
+   * phone's browser. The phone game still sends its own resets to `whaaack://auth`.
    */
   async function requestPasswordReset(email) {
     const address = String(email || '').trim()
@@ -432,7 +426,7 @@ export function createBackend({ url, anonKey, fetch, storage }) {
 
     setStatus({ state: AUTH_WORKING, email: address })
 
-    const result = await call('/auth/v1/recover?redirect_to=' + encodeURIComponent(RESET_REDIRECT), {
+    const result = await call('/auth/v1/recover?redirect_to=' + encodeURIComponent(AUTH_REDIRECT), {
       method: 'POST',
       body: { email: address },
     })

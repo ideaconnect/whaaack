@@ -62,7 +62,8 @@ jobs:
             website/sitemap.xml \
             website/app-ads.txt \
             website/assets/css/site.css \
-            website/assets/js/site.js
+            website/assets/js/site.js \
+            website/assets/js/backend-config.js
           do
             if [ ! -f "$f" ]; then echo "::error::missing $f"; missing=1; fi
           done
@@ -77,6 +78,15 @@ jobs:
         run: |
           grep -qxF 'google.com, pub-6904561240517963, DIRECT, f08c47fec0942fa0' website/app-ads.txt \
             || { echo "::error file=website/app-ads.txt::the DIRECT record line is missing or altered"; exit 1; }
+
+      # The publishable key reaches the site by injection at deploy time, never by commit -
+      # website/assets/js/backend-config.js says what it is and why, and
+      # tools/sync_zepp_secrets.py made the same call for the watch. A real key pasted in
+      # here would work perfectly, which is exactly why nothing would ever notice.
+      - name: Verify the publishable key is not committed
+        run: |
+          grep -qF '__SUPABASE_PUBLISHABLE_KEY__' website/assets/js/backend-config.js \
+            || { echo "::error file=website/assets/js/backend-config.js::the placeholder is gone - the key must not be committed here"; exit 1; }
 
       # The contact form redirects here after a successful submit, and Web3Forms
       # sends the visitor to whatever absolute URL is baked into the form. If the
@@ -171,6 +181,11 @@ jobs:
       # listed anyway because a *new* host appearing is worth one deliberate look either way,
       # and because a resource load and a link are one attribute apart.
       #
+      # The Supabase project host is the fourth recipient, and the only one a page here *sends*
+      # to rather than loads from: /whaaack/auth/ PUTs a new password to it when somebody
+      # follows a reset link that came from the watch edition. It is in the privacy policy's
+      # recipients list, where it already stood as the game's backend.
+      #
       # play.google.com is pre-approved: the store badge is scheduled to land here at launch,
       # and a red CI run on that edit would be noise rather than signal.
       #
@@ -189,6 +204,7 @@ jobs:
           grep -rhoE 'https://[a-zA-Z0-9.-]+' website/ --include=*.html --include=*.css --include=*.js | sed 's|https://||' | sort -u > hosts.txt
           cat > allowed.txt <<'HOSTS'
           idct.tech
+          pklrfcbyseitdbxkmsnw.supabase.co
           api.web3forms.com
           js.hcaptcha.com
           github.com
@@ -217,6 +233,43 @@ jobs:
         run: test ! -f website/CNAME
 
       - uses: actions/configure-pages@v6
+
+      # The publishable key goes into the copy that is about to be uploaded, and nowhere else.
+      # See website/assets/js/backend-config.js for what it is and why it is not in git.
+      #
+      # Deliberately fatal when the secret is unset. The page that needs it takes a password
+      # from somebody who is locked out of their account; publishing it still pointed at the
+      # placeholder would put up a form that accepts a password and changes nothing - the one
+      # outcome worse than the page not being there at all. A red run here is a five-second
+      # fix (gh secret set SUPABASE_PUBLISHABLE_KEY); a green one hiding a dead form is not.
+      #
+      # Substituted in Python rather than with sed because the key is opaque text nobody here
+      # reads, and a single / or & in it would silently mangle a sed replacement into
+      # something that still looks like a key.
+      - name: Put the publishable key into the copy being deployed
+        if: github.ref == 'refs/heads/main'
+        env:
+          KEY: ${{ secrets.SUPABASE_PUBLISHABLE_KEY }}
+        run: |
+          if [ -z "${KEY}" ]; then
+            echo "::error::the SUPABASE_PUBLISHABLE_KEY repository secret is not set"
+            echo "Set it with: gh secret set SUPABASE_PUBLISHABLE_KEY"
+            exit 1
+          fi
+          python3 - <<'EOF'
+          import os, pathlib
+          path = pathlib.Path("website/assets/js/backend-config.js")
+          text = path.read_text(encoding="utf-8")
+          if "__SUPABASE_PUBLISHABLE_KEY__" not in text:
+              raise SystemExit("::error::no placeholder to replace in backend-config.js")
+          path.write_text(text.replace("__SUPABASE_PUBLISHABLE_KEY__", os.environ["KEY"]),
+                          encoding="utf-8")
+          EOF
+          if grep -qF '__SUPABASE_PUBLISHABLE_KEY__' website/assets/js/backend-config.js; then
+            echo "::error::the placeholder survived the substitution"
+            exit 1
+          fi
+          echo 'publishable key injected'
 
       - name: Upload Pages artifact
         if: github.ref == 'refs/heads/main'
