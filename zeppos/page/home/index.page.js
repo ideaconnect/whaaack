@@ -127,9 +127,18 @@ Page(
     },
 
     onResume() {
-      // Coming back from a run: the best may have moved, and a sign-in may have happened
-      // on the phone while the watch was showing something else.
+      // Coming back from a run: the best may have moved, a sign-in may have happened on
+      // the phone while the watch was showing something else, and the run just played is
+      // the only thing that can have discovered whether this watch can make a noise.
+      //
+      // All three have to be re-read here and nowhere else. The game page is opened with
+      // `push`, so this page is never torn down and `build` never runs a second time - a
+      // label written once at build time is written for the lifetime of the app. The
+      // sound one was missed on the first pass, which left the toggle promising "Sound
+      // on" over a watch that had refused outright a minute earlier: exactly the state
+      // the whole `soundOk` record exists to report.
       setText(bestLabel, bestText())
+      setText(soundButton, soundText())
       this.refreshAccount()
     },
 

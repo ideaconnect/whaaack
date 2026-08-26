@@ -360,12 +360,21 @@ Page(
      * advice at all if the real answer was that the server refused the row.
      */
     submit(millis, hits) {
+      // The colour is reset alongside every write, not only on the paths that set one.
+      // These widgets are built once and reused by every later run on this visit, so the
+      // green that meant "Saved to the board" at the end of one run is still on the widget
+      // at the start of the next - and "Saving…" rendered in it says the run is already on
+      // the board while the request is still on the wire.
       if (submitted || millis <= 0) {
-        if (millis <= 0) setText(view.result.status, '')
+        if (millis <= 0) {
+          setText(view.result.status, '')
+          setColor(view.result.status, CREAM_FAINT)
+        }
         return
       }
       submitted = true
       setText(view.result.status, getText('saving'))
+      setColor(view.result.status, CREAM_FAINT)
 
       this.request({ method: REQ_SUBMIT, params: { millis, hits } })
         .then((data) => {

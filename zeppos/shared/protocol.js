@@ -48,6 +48,12 @@ export const KEY_AUTH_REQUEST = 'authRequest'
  * The settings page renders straight from this, so the phone always shows what the
  * service actually managed to do rather than what the form hoped it would.
  *
+ * `notice`, `problem` and `busy` are stamped with `noticeAt` and are only true for as
+ * long as that is recent. This key is storage: it outlives the page, the app and the phone
+ * being switched off, so an unstamped "Password changed." would greet the player in green
+ * under an empty field every time they opened the page for the rest of the account's life,
+ * and a `busy` whose answer never arrived would leave a button reading "Working…" for ever.
+ *
  * `notice`, `problem` and `busy` belong to the signed-in state and to nothing else. A
  * password change happens *inside* an account that is already signed in, so its progress
  * and its outcome cannot be reported as `working` or `error` the way sign-in's are: the

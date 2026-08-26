@@ -75,6 +75,26 @@ const IDCT_URL = 'https://idct.tech'
  */
 const CENTRED = { textAlign: 'center' }
 
+/**
+ * How long the outcome of a password change is still news.
+ *
+ * The status this page renders from lives in `settingsStorage`, which outlives the page,
+ * the app, and the phone being switched off. So "Password changed." with nothing to date
+ * it is not a report - it is a permanent green line under an empty field, greeting the
+ * player every time they open this page for the rest of the account's life, and a refusal
+ * is a permanent red one. `busy` is worse: a request sent while the phone had no
+ * connection leaves a button reading "Working…" for ever.
+ *
+ * Five minutes is long enough to survive the round trip and a distracted glance away, and
+ * short enough that nothing here is ever mistaken for something that just happened.
+ */
+const NOTICE_TTL_MS = 5 * 60 * 1000
+
+/** Whether a status is still reporting rather than reminiscing. */
+function recent(status) {
+  return !!status.noticeAt && Date.now() - status.noticeAt < NOTICE_TTL_MS
+}
+
 
 const CARD = {
   display: 'block',
@@ -283,7 +303,11 @@ AppSettingsPage({
     const password = draftNewPassword
     if (!password) {
       this.setStatus(
-        Object.assign({}, status, { notice: null, problem: gettext('newPasswordNeeded') }),
+        Object.assign({}, status, {
+          noticeAt: Date.now(),
+          notice: null,
+          problem: gettext('newPasswordNeeded'),
+        }),
       )
       return
     }
@@ -297,7 +321,14 @@ AppSettingsPage({
       KEY_AUTH_REQUEST,
       JSON.stringify({ action: 'password', password, at: Date.now() }),
     )
-    this.setStatus(Object.assign({}, status, { notice: null, problem: null, busy: true }))
+    this.setStatus(
+      Object.assign({}, status, {
+        noticeAt: Date.now(),
+        notice: null,
+        problem: null,
+        busy: true,
+      }),
+    )
   },
 
   heading(status) {
@@ -376,7 +407,11 @@ AppSettingsPage({
    * you cannot see, and this one is legible the whole time it is being typed.
    */
   passwordCard(status) {
-    const busy = !!status.busy
+    // Everything this card reports about is only true for as long as it is recent; see
+    // NOTICE_TTL_MS. Past that the card goes back to being an empty field and a button,
+    // which is what it is.
+    const fresh = recent(status)
+    const busy = !!status.busy && fresh
     const rows = [
       line(gettext('changePassword'), {
         fontSize: '15px',
@@ -407,9 +442,9 @@ AppSettingsPage({
       }),
     ]
 
-    if (status.problem) {
+    if (fresh && status.problem) {
       rows.push(line(status.problem, { fontSize: '13px', color: DANGER, marginTop: '12px' }))
-    } else if (status.notice) {
+    } else if (fresh && status.notice) {
       rows.push(line(status.notice, { fontSize: '13px', color: OK, marginTop: '12px' }))
     }
 

@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Email confirmed — Whaaack!</title>
+<title>Confirming your email — Whaaack!</title>
 <meta name="description" content="Confirms the email address on a Whaaack! account.">
 <meta name="theme-color" content="#140a1a">
 <meta name="robots" content="noindex">
@@ -131,6 +131,11 @@
     mark.textContent = emoji;
     eyebrow.textContent = eyebrowText;
     title.textContent = headline;
+    /* The tab, the history entry this page leaves behind, the task switcher and any
+       bookmark all read the <title>, and none of them read the headline. Left at a
+       hard-coded "Email confirmed" it would tell somebody checking their history days
+       later that a signup went through when the link had in fact expired. */
+    document.title = headline + ' — Whaaack!';
     body.textContent = '';
     paragraphs.forEach(function (text) {
       var p = document.createElement('p');

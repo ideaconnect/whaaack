@@ -349,15 +349,31 @@ export function createBackend({ url, anonKey, fetch, storage }) {
       return { changed: false, reason: 'signed_out' }
     }
 
-    const named = { name: session.name || '', email: session.email || '' }
+    /**
+     * A signed-in status carrying the result of something that has just happened.
+     *
+     * Stamped, and that stamp is not decoration. `KEY_AUTH_STATUS` is *storage*: it
+     * outlives the page, the app, and the phone being switched off, and the settings page
+     * rebuilds straight out of it. With no time on it, "Password changed." stops being a
+     * report and becomes a permanent green line greeting the player under an empty field
+     * every time they open the page for the rest of the account's life. A refusal is a
+     * permanent red one, and a `busy` that never got its answer - because the phone was
+     * off when the request went out - is a button that says "Working…" for ever.
+     */
+    const report = (extra) =>
+      Object.assign(
+        { state: AUTH_SIGNED_IN, name: session.name || '', email: session.email || '' },
+        { noticeAt: Date.now() },
+        extra,
+      )
 
     const complaint = validatePassword(newPassword)
     if (complaint) {
-      setStatus(Object.assign({ state: AUTH_SIGNED_IN }, named, { problem: complaint }))
+      setStatus(report({ problem: complaint }))
       return { changed: false, message: complaint }
     }
 
-    setStatus(Object.assign({ state: AUTH_SIGNED_IN }, named, { busy: true }))
+    setStatus(report({ busy: true }))
 
     const result = await authorized('/auth/v1/user', {
       method: 'PUT',
@@ -379,16 +395,14 @@ export function createBackend({ url, anonKey, fetch, storage }) {
           : code === 'weak_password'
             ? PASSWORD_HINT
             : errorMessage(result, 'Could not change the password just now.')
-      setStatus(Object.assign({ state: AUTH_SIGNED_IN }, named, { problem: message }))
+      setStatus(report({ problem: message }))
       return { changed: false, message }
     }
 
     // Nothing to store. The response carries a user rather than tokens, and with
     // `secure_password_change` off the session that made the change stays valid - so the
     // player is still signed in on both the phone and the watch, which is what they meant.
-    setStatus(
-      Object.assign({ state: AUTH_SIGNED_IN }, named, { notice: 'Password changed.' }),
-    )
+    setStatus(report({ notice: 'Password changed.' }))
     return { changed: true }
   }
 
@@ -676,6 +690,7 @@ export function createBackend({ url, anonKey, fetch, storage }) {
           state: session ? AUTH_SIGNED_IN : AUTH_SIGNED_OUT,
           name: session ? session.name || '' : undefined,
           email: session ? session.email || '' : undefined,
+          noticeAt: Date.now(),
           problem: describe(error, 'Could not reach the sign-in service.'),
         })
       })

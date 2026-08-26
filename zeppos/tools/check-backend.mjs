@@ -246,6 +246,55 @@ async function main() {
     )
   }
 
+  // ------------------------------------------------- a result that expires
+  //
+  // KEY_AUTH_STATUS is storage: it outlives the page, the app and the phone being switched
+  // off, and the settings page rebuilds straight out of it. So the outcome of a password
+  // change has to carry the time it happened, or "Password changed." stops being a report
+  // and becomes a permanent green line greeting the player under an empty field for the
+  // rest of the account's life. Stubbed, because what is being checked is the shape of
+  // what gets written, not the round trip.
+  {
+    const store = memoryStorage()
+    store.setItem(
+      KEY_SESSION,
+      JSON.stringify({
+        accessToken: 'a',
+        refreshToken: 'r',
+        expiresAt: Date.now() + 3600000,
+        userId: 'u',
+        name: 'Someone',
+        email: 'someone@example.invalid',
+      }),
+    )
+    const offline = createBackend({
+      url,
+      anonKey,
+      storage: store,
+      fetch: async () => ({ status: 200, statusText: 'OK', body: '{}' }),
+    })
+
+    const before = Date.now()
+    const changed = await offline.changePassword('orchard42')
+    const after = JSON.parse(store.getItem(KEY_AUTH_STATUS))
+
+    check('a password change on a live session succeeds', changed.changed === true, changed.message)
+    check(
+      'and never leaves the account card',
+      after.state === 'signed_in',
+      after.state,
+    )
+    check(
+      'and stamps its result so it cannot be shown as news for ever',
+      typeof after.noticeAt === 'number' && after.noticeAt >= before,
+      'noticeAt=' + after.noticeAt,
+    )
+
+    const weak = await offline.changePassword('short')
+    const refused = JSON.parse(store.getItem(KEY_AUTH_STATUS))
+    check('a refusal is stamped too', typeof refused.noticeAt === 'number', weak.message)
+  }
+
   // ------------------------------------------------------------- wrong password
   storage.setItem(
     KEY_AUTH_REQUEST,

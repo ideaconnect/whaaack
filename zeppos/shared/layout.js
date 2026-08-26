@@ -40,8 +40,13 @@ export const FRUIT = px(64)
  * Deliberately wider than the tile it belongs to. A splat that stopped at the tile edge
  * would read as a coloured tile rather than as something that burst, and the overspill is
  * most of what sells it - the phone splashes across the gutter into its neighbours too.
- * The far corner of the far tile plus this overspill still clears the rim: the grid ends
- * at (388, 406), the spill takes that to (396, 412), and sqrt(156^2 + 172^2) = 232 < 240.
+ *
+ * The spill is not symmetrical, which is the part that is easy to get wrong: `SPLAT_DY`
+ * shifts the bitmap *down* by 6px so it sits below the tile's centre, so 6px of the 16px
+ * overhang goes above the tile and 10px below. The bottom-right splat therefore spans to
+ * (396, 416), not to (396, 412) - sqrt(156^2 + 176^2) = 235 against a rim at 240. Still
+ * clear, but by five pixels rather than the eight an even split would give, and this
+ * comment is the only place that is checked.
  */
 export const SPLAT = px(108)
 
