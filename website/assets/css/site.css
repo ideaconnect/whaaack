@@ -235,6 +235,21 @@ p { margin: 0 0 1em; }
 }
 .card:hover { transform: translateY(-4px); border-color: var(--line-strong); }
 .card .ico { font-size: 1.7rem; display: block; margin-bottom: 10px; }
+
+/* A watch screenshot inside a card.
+
+   Sized against the card rather than pinned at its own 360px, so a narrow column shrinks
+   it instead of letting it overflow; `auto` height keeps the circle a circle at every
+   width. Centred because a round image flush to one edge of a rectangular card reads as a
+   mistake rather than as a decision. The `width`/`height` attributes stay on the tag so
+   the space is reserved before it loads and the card does not jump. */
+.watch-shot {
+  display: block;
+  width: 100%;
+  max-width: 200px;
+  height: auto;
+  margin: 0 auto 16px;
+}
 .card .ico img { width: 38px; height: 38px; image-rendering: pixelated; }
 .card p { color: var(--cream-dim); font-size: .95rem; margin: 0; }
 

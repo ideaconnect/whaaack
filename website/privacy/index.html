@@ -47,7 +47,12 @@
   <div class="wrap prose">
     <span class="eyebrow">Legal</span>
     <h1 style="font-size:clamp(2rem,5vw,3rem)">Privacy Policy</h1>
-    <p class="updated">Last updated: 16 August 2026 · Applies to the Whaaack! Android app and to this website.<br>
+    <p class="updated">Last updated: 26 August 2026 · Applies to the Whaaack! Android app, the
+    Amazfit watch edition, and to this website.<br>
+    <em>What changed on 26 August 2026:</em> a second Whaaack! now runs on Amazfit watches under
+    Zepp&nbsp;OS, sharing this account and this backend with the Android game. What it keeps on
+    the watch, what it sends, and what it deliberately has no way to reach are set out at the end
+    of <a href="#what">section 2</a>.<br>
     <em>What changed on 16 August 2026:</em> Google Play Games was added to the app — achievements,
     run statistics, and the option to create an account from your Play Games identity. That is
     <a href="#playgames">section 4</a>, and it also changed what
@@ -226,6 +231,42 @@
       it is deliberately excluded from Android cloud backup and from device-to-device
       transfer, so a restored backup cannot carry your session onto another phone.</li>
     </ul>
+
+    <h3 id="watch">The Amazfit watch edition</h3>
+    <p>There is a second Whaaack! that runs on Amazfit watches under Zepp&nbsp;OS. It shares this
+    account and this backend with the Android game, so everything above applies to it — but it is
+    a different device with different capabilities, and the differences are all in your favour.
+    Setting them out plainly:</p>
+    <ul>
+      <li><strong>It stores two things on the watch itself:</strong> your best time and whether
+      sound is on. That is the whole list. There is no equivalent of the Android settings file,
+      and nothing on the watch is included in any cloud backup of ours.</li>
+      <li><strong>Your sign-in session never reaches the watch.</strong> The access and refresh
+      tokens are held by the companion service inside the Zepp app on your phone, which is what
+      makes every network call. The watch asks it for a leaderboard and gets rows back; a token
+      never crosses to your wrist.</li>
+      <li><strong>Signed in, it sends exactly three things:</strong> your email address and
+      password, to sign in or create the account; the display name you choose; and, for each
+      finished run, how long it lasted and how many fruit you hit. Nothing else about the run,
+      the watch or you is transmitted.</li>
+      <li><strong>Opening the leaderboard fetches the public rankings</strong> — display names and
+      times — whether or not you are signed in. That request asks for data rather than sending
+      any about you.</li>
+      <li><strong>It reads one thing about your watch:</strong> the screen size, so it can lay the
+      board out for a round display. It does not read or collect heart rate, activity, sleep,
+      location or any other sensor or health data, and it holds no permission that would let it.
+      The only hardware it drives is the vibration motor, which is output rather than
+      collection.</li>
+      <li><strong>No ads, no analytics, no tracking, and no Play Games.</strong>
+      <a href="#ads">Section 3</a> and <a href="#playgames">section 4</a> describe things the
+      watch app simply does not contain.</li>
+    </ul>
+    <p>Watch runs are ranked on a board of their own rather than mixed with phone scores, because
+    a three-by-three grid tapped with one finger does not produce comparable times to a
+    four-by-four tapped with two thumbs. They are still your rows, on your account: deleting your
+    account under <a href="#deletion">section 7</a> removes them along with everything else, in
+    the same operation and by the same cascade. You can also simply play without an account, in
+    which case the watch keeps your best time locally and sends nothing at all.</p>
 
     <h2 id="ads">3. Ads, and your control over them</h2>
     <p>Whaaack! shows ads through <strong>Google AdMob</strong>. In practice that means at most
