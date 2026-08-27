@@ -162,13 +162,22 @@ const vibrator = new Vibrator()
 /**
  * What the motor says. Two things, and the run ending is not one of them.
  *
- *   a hit    SHORT_LIGHT   one tap, 20ms - the lightest thing the motor can do. It happens
- *                          up to five times a second at the top of the curve, so it has to
- *                          be over before the next one and it has to stay out of the way.
- *   a miss   DURATION      600ms held. Deeper by being *longer*, which is the only way
- *                          this API has of being deeper: the three short scenes are all
- *                          20ms and differ only in strength, so strength alone would make
- *                          a strike feel like a firmer hit rather than a different event.
+ * THE SCENE CONSTANTS DO NOT DO WHAT THE REFERENCE SAYS ON THIS HARDWARE, and these two
+ * are picked by what they were felt to do rather than by what they are called. Per the
+ * typings, `SHORT_LIGHT` is "light intensity, 20ms" and `DURATION` is "high intensity,
+ * lasting 600ms" - so a whack should have been the smaller of the two by a wide margin.
+ * On the wrist it is the other way round: `DURATION` is the short, barely-there tap and
+ * `SHORT_LIGHT` is the heavier one.
+ *
+ * Three attempts were made at this reasoning from the documentation, and all three came
+ * out inverted, which is what finally settled that the documentation is not the authority
+ * here. The names below say what each one is *for*; the constants beside them are only
+ * where that feeling happens to live.
+ *
+ *   a whack   the barely-there tap. It happens up to five times a second at the top of the
+ *             curve, so it has to stay out of the way - felt, not announced.
+ *   a miss    the heavier one. Three of these end the run, so it has to be the one that
+ *             registers when you are not looking at the screen.
  *
  * Nothing marks the end of the run. It was four pulses over 1200ms, which is a long time
  * to be buzzed at about something the screen has already said, and it landed immediately
@@ -178,18 +187,17 @@ const vibrator = new Vibrator()
  * by `start()`. The two-call form buzzed more than once for a single whack - whether
  * because setting the mode fires the motor itself, or because a `start()` on a mode that
  * is already set repeats it, is not something this end can see. What is visible is that
- * one call does one thing, and the API documents that shape.
+ * one call does one thing.
  *
  * `stop()` is deliberately not called before either. It was, on the miss, on the theory
- * that a mode set mid-pulse might not take - and the miss came out *delicate* while the
- * hit, which never stopped anything, came out solid. Stopping the motor and immediately
- * restarting it appears to swallow the start, which is the same shape of trap as `stop()`
- * unloading the media player: the call that looks like it makes the next one reliable is
- * the one that loses it.
+ * that a mode set mid-pulse might not take, and what it actually did was swallow the start
+ * - the same shape of trap as `stop()` unloading the media player.
  *
- * DURATION stops on its own after 600ms. VIBRATOR_SCENE_CALL and _TIMER are the two that
- * run until `stop()` is called, and neither belongs in a game.
+ * Neither of these runs until stopped. VIBRATOR_SCENE_CALL and _TIMER are the two that do,
+ * and neither belongs in a game.
  */
+const WHACK_SCENE = VIBRATOR_SCENE_DURATION
+const MISS_SCENE = VIBRATOR_SCENE_SHORT_LIGHT
 
 /**
  * A hit will not re-fire the motor sooner than this.
@@ -212,17 +220,18 @@ const HIT_MIN_GAP_MS = 55
 let lastBuzzedHit = 0
 
 /**
- * How long a strike keeps the motor to itself: exactly as long as its own buzz.
+ * How long a strike keeps the motor to itself.
  *
  * A miss and a hit can land in the same handful of milliseconds - the fruit that escaped
- * and the one just whacked are independent - and a 20ms tap starting on top of the hold
- * would cut 600ms of it away, so the strike would be felt as something smaller than a hit.
- * The strike is the more important of the two: it is a third of the run.
+ * and the one just whacked are independent - and a whack starting on top of the strike
+ * would cut it short, so the strike would be felt as the smaller of the two. It is the
+ * more important one: it is a third of the run.
  *
- * The cost is real and is accepted: for that 600ms, whacks do not answer. Having just lost
- * a fruit is the thing worth feeling at that moment.
+ * Short, because the strike buzz is itself short. It was 600ms when the strike was thought
+ * to be a 600ms hold, which silenced whacks for over half a second every time one got
+ * away - a long time to be told nothing while the board is still moving.
  */
-const MISS_HOLDS_MOTOR_MS = 600
+const MISS_HOLDS_MOTOR_MS = 150
 
 let lastHitBuzzMs = 0
 let motorHeldUntil = 0
@@ -238,13 +247,13 @@ function buzzHit(now) {
   if (now < motorHeldUntil) return
   if (now - lastHitBuzzMs < HIT_MIN_GAP_MS) return
   lastHitBuzzMs = now
-  buzz(VIBRATOR_SCENE_SHORT_LIGHT)
+  buzz(WHACK_SCENE)
 }
 
 /** One got away: deeper, by being longer. */
 function buzzMiss(now) {
   motorHeldUntil = now + MISS_HOLDS_MOTOR_MS
-  buzz(VIBRATOR_SCENE_DURATION)
+  buzz(MISS_SCENE)
 }
 
 const view = {

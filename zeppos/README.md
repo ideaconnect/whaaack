@@ -332,17 +332,23 @@ by feel alone, in the dark, without looking:
 
 | | | |
 |---|---|---|
-| a hit | `SHORT_LIGHT` | one tap, 20ms — the lightest thing the motor can do, and over before the next whack |
-| a miss | `DURATION` | 600ms held — deeper by being *longer*, the only way this API has of being deeper |
+| a whack | `DURATION` | the barely-there tap — felt, not announced, up to five times a second |
+| a miss | `SHORT_LIGHT` | the heavier one — it has to register when you are not looking |
 
 Two things, and the end of the run is not one of them. It used to be four pulses over
 1200ms, which is a long time to be buzzed at about something the screen has already said,
 and it landed immediately after the strike that caused it — so the last thing a run did was
 talk over itself.
 
-Deeper has to mean longer here. The three short scenes are all 20ms and differ only in
-strength, and there is no frequency control anywhere in `@zos/sensor`, so grading a strike
-by strength alone makes it feel like a firmer hit rather than a different kind of event.
+**Those constants are the wrong way round on purpose.** The typings say `SHORT_LIGHT` is
+"light intensity, 20ms" and `DURATION` is "high intensity, lasting 600ms", so a whack should
+be much the smaller of the two. On the wrist it is the other way round: `DURATION` is the
+short barely-there tap and `SHORT_LIGHT` is the heavier one.
+
+Three attempts were made at this by reasoning from the documentation and all three came out
+inverted, which is what settled that the documentation is not the authority here. The code
+names them `WHACK_SCENE` and `MISS_SCENE` — what each is *for* — because the constant beside
+it is only where that feeling happens to live, and nothing about the name predicts it.
 
 Both go through **`start({ mode })`**, the one-call form, rather than `setMode()` followed
 by `start()`. The two-call form buzzed more than once for a single whack — whether because
