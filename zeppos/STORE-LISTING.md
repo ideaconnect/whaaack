@@ -61,14 +61,22 @@ window captures. The console's rule differs by shape and the tool does both:
 * **round** — fills the box, with the corners punched out to transparent, because the
   corners are not display.
 
-| | |
-|---|---|
-| square | `../assets/zepp/screenshots/square/` — play, result, menu, leaderboard |
-| round | not built yet |
+Both sets are four shots in the same order — a run in progress, the result it ended on, the
+menu, the leaderboard:
 
-Every one is a real run. The result shot is a genuine 58.0s with 300 hits, which is what
-earns the thirty-second badge and the trophy beside it; none of it is staged, and none of
-it should be. A screenshot of a score the game did not produce is a promise it cannot keep.
+| | | |
+|---|---|---|
+| square | `../assets/zepp/screenshots/square/` | captured on Active 2 Square, 390x450 |
+| round | `../assets/zepp/screenshots/round/` | captured on T-Rex 3 Pro 48mm, 480x480 |
+
+Every one is a real run, and the two result shots differ for a reason worth not
+"fixing": the square one carries the trophy and the round one does not. The trophy means
+you beat your own previous best, and the round device's storage was empty, so a first run
+has nothing to beat. Both show a genuine 58.0s and the thirty-second badge that earns.
+
+A screenshot of a score the game did not produce is a promise it cannot keep, and the badge
+thresholds could have been lowered for a minute to stage one. That would be a lie told in
+the exact place somebody decides whether to install.
 
 ---
 

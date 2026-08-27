@@ -40,17 +40,20 @@ OUT_ROOT = ROOT / "assets" / "zepp" / "screenshots"
 
 BOX = 360
 
-# Where the watch surface sits inside a simulator window capture.
-FRAMEBUFFER_ORIGIN = (136, 78)
+# Where the watch surface sits inside a simulator window capture. It moves with the shape,
+# because the window is a fixed size and the watch is centred in it: a 390-wide square
+# screen starts further right than a 480-wide round one. Override with --origin; these are
+# the two that have been measured.
+FRAMEBUFFER_ORIGIN = {"square": (136, 78), "round": (91, 78)}
 
 # Four times the output, so the circular cut-out for a round screen is smooth once it comes
 # back down. A hard mask at 360 leaves a visibly stepped rim on a dark screenshot.
 SUPERSAMPLE = 4
 
 
-def surface(raw: Path, size: tuple[int, int]) -> Image.Image:
+def surface(raw: Path, size: tuple[int, int], origin: tuple[int, int]) -> Image.Image:
     """The watch screen alone, lifted out of a window capture."""
-    left, top = FRAMEBUFFER_ORIGIN
+    left, top = origin
     width, height = size
     image = Image.open(raw).convert("RGBA")
     if image.width < left + width or image.height < top + height:
@@ -92,12 +95,27 @@ def main() -> int:
     ap.add_argument("shape", choices=("round", "square"))
     ap.add_argument("size", help="framebuffer size, e.g. 390x450")
     ap.add_argument("raw", nargs="+", help="window captures, in the order to show them")
+    ap.add_argument(
+        "--origin",
+        help="framebuffer top-left in the capture, e.g. 91,78; defaults to the measured "
+        "position for this shape",
+    )
     args = ap.parse_args()
 
     try:
         width, height = (int(n) for n in args.size.lower().split("x"))
     except ValueError:
         raise SystemExit(f"could not read a WIDTHxHEIGHT out of {args.size!r}")
+
+    if args.origin:
+        try:
+            origin = tuple(int(n) for n in args.origin.split(","))
+            if len(origin) != 2:
+                raise ValueError
+        except ValueError:
+            raise SystemExit(f"could not read an X,Y out of {args.origin!r}")
+    else:
+        origin = FRAMEBUFFER_ORIGIN[args.shape]
 
     out = OUT_ROOT / args.shape
     out.mkdir(parents=True, exist_ok=True)
@@ -106,7 +124,7 @@ def main() -> int:
         raw = Path(name)
         if not raw.exists():
             raise SystemExit(f"missing: {raw}")
-        image = to_box(surface(raw, (width, height)), args.shape)
+        image = to_box(surface(raw, (width, height), origin), args.shape)
         dest = out / f"{index:02d}-{raw.stem}.png"
         image.save(dest)
         opaque = image.split()[3].getbbox()
