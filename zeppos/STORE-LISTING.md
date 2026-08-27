@@ -50,6 +50,26 @@ Feedback: whaaack@idct.tech
 
 `../assets/zepp/app-icon-240.png` — 240x240, circular, transparent outside the circle.
 
+## Screenshots
+
+360x360 PNG with a transparent background, three or more, built by
+[`../tools/make_zepp_screenshots.py`](../tools/make_zepp_screenshots.py) from raw simulator
+window captures. The console's rule differs by shape and the tool does both:
+
+* **square** — fitted by *height*, so 390x450 becomes 312x360 with 24px of transparency
+  down each side and none top or bottom. Nothing is cropped.
+* **round** — fills the box, with the corners punched out to transparent, because the
+  corners are not display.
+
+| | |
+|---|---|
+| square | `../assets/zepp/screenshots/square/` — play, result, menu, leaderboard |
+| round | not built yet |
+
+Every one is a real run. The result shot is a genuine 58.0s with 300 hits, which is what
+earns the thirty-second badge and the trophy beside it; none of it is staged, and none of
+it should be. A screenshot of a score the game did not produce is a promise it cannot keep.
+
 ---
 
 ## Call Permission
